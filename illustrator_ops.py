@@ -31,151 +31,193 @@ def run_jsx(app, s: str):
         print(f"!!! JSX Error (Might be harmless): {e}")
 
 # --- סקריפטים JSX ---
-
-# 📢 מעודכן: כולל את isRaster=True/False (כ- %ISRASTER%)
 JSX_CLEAN_MAGIC = """
 #target illustrator
 
 // פונקציה להשוואת צבעים
 function isSameColor(c1, c2) {
-    if (!c1 || !c2) return false;
-    if (c1.typename !== c2.typename) return false;
+    if (!c1 || !c2) return false;
+    if (c1.typename !== c2.typename) return false;
 
-    var t = 1; 
+    var t = 1; 
 
-    if (c1.typename === 'RGBColor') {
-        return Math.abs(c1.red - c2.red) <= t && 
-               Math.abs(c1.green - c2.green) <= t && 
-               Math.abs(c1.blue - c2.blue) <= t;
-    }
+    if (c1.typename === 'RGBColor') {
+        return Math.abs(c1.red - c2.red) <= t && 
+               Math.abs(c1.green - c2.green) <= t && 
+               Math.abs(c1.blue - c2.blue) <= t;
+    }
 
-    if (c1.typename === 'CMYKColor') {
-        return c1.cyan === c2.cyan && c1.magenta === c2.magenta && 
-               c1.yellow === c2.yellow && c1.black === c2.black;
-    }
+    if (c1.typename === 'CMYKColor') {
+        return c1.cyan === c2.cyan && c1.magenta === c2.magenta && 
+               c1.yellow === c2.yellow && c1.black === c2.black;
+    }
 
-    if (c1.typename === 'GrayColor') {
-        return Math.abs(c1.gray - c2.gray) <= t;
-    }
-    return false;
+    if (c1.typename === 'GrayColor') {
+        return Math.abs(c1.gray - c2.gray) <= t;
+    }
+    return false;
 }
 
 // פונקציה לניקוי שאריות קטנות בצבע של הרקע
 function removeInternalParts(container, bgCol) {
-    for (var i = container.pageItems.length - 1; i >= 0; i--) {
-        var item = container.pageItems[i];
+    for (var i = container.pageItems.length - 1; i >= 0; i--) {
+        var item = container.pageItems[i];
 
-        if (item.typename === 'GroupItem') {
-            removeInternalParts(item, bgCol);
-        } 
-        else if ((item.typename === 'PathItem' || item.typename === 'CompoundPathItem') && !item.clipping) {
-            var colorMatch = false;
-            if (item.typename === 'PathItem' && item.filled && isSameColor(item.fillColor, bgCol)) colorMatch = true;
-            if (item.typename === 'CompoundPathItem' && item.pathItems.length > 0 && 
-                item.pathItems[0].filled && isSameColor(item.pathItems[0].fillColor, bgCol)) colorMatch = true;
+        if (item.typename === 'GroupItem') {
+            removeInternalParts(item, bgCol);
+        } 
+        else if ((item.typename === 'PathItem' || item.typename === 'CompoundPathItem') && !item.clipping) {
+            var colorMatch = false;
+            if (item.typename === 'PathItem' && item.filled && isSameColor(item.fillColor, bgCol)) colorMatch = true;
+            if (item.typename === 'CompoundPathItem' && item.pathItems.length > 0 && 
+                item.pathItems[0].filled && isSameColor(item.pathItems[0].fillColor, bgCol)) colorMatch = true;
 
-            if (colorMatch) {
-                item.remove();
-            }
-        }
-    }
+            if (colorMatch) {
+                item.remove();
+            }
+        }
+    }
 }
 
 function run(ln, grpN, r, g, b, doC, isRaster) {
-    
-    // 📢 בדיקה ראשונית: אם זה רסטר, מדלגים על כל שלבי הניקוי
-    if (isRaster === true) {
-        // אם רק צביעה נדרשת, מבצעים רק צביעה (למקרה של לוגו צבע אחד שהפך לרסטר)
-        if (doC === true) {
-            var c = new RGBColor(); c.red=r; c.green=g; c.blue=b;
-            try {
-                var groupRefresh = app.activeDocument.pageItems.getByName(grpN);
-                if(groupRefresh) colRec(groupRefresh, c);
-            } catch(e) {}
-        }
-        return; // 🎯 עצירה כאן
-    }
-    // ----------------------------------------------------
+    
+    // בדיקה ראשונית: אם זה רסטר, מדלגים
+    if (isRaster === true) {
+        if (doC === true) {
+            var c = new RGBColor(); c.red=r; c.green=g; c.blue=b;
+            try {
+                var groupRefresh = app.activeDocument.pageItems.getByName(grpN);
+                if(groupRefresh) colRec(groupRefresh, c);
+            } catch(e) {}
+        }
+        return; 
+    }
+    // ----------------------------------------------------
 
-    try {
-        var doc = app.activeDocument;
-        var group = doc.pageItems.getByName(grpN);
-        
-        // 1. ניקוי "זבל" בסוף הקבוצה (השכבה הכי תחתונה)
-        try {
-            var count = group.pageItems.length;
-            if (count > 0) {
-                var lastItem = group.pageItems[count - 1];
-                if (lastItem.typename === "GroupItem" || lastItem.typename === "PathItem") {
-                    lastItem.remove();
-                }
-            }
-        } catch(e){}
+    try {
+        var doc = app.activeDocument;
+        var group = doc.pageItems.getByName(grpN);
+        
+        // 1. ניקוי "זבל" ראשוני מתחתית הקבוצה (קוים שקופים וכו')
+        // נעשה את זה פעמיים כדי לוודא שניקינו לכלוך
+        for(var k=0; k<2; k++){
+            try {
+                var c = group.pageItems.length;
+                if (c > 0) {
+                    var last = group.pageItems[c - 1];
+                    // אם זה path ללא מילוי וללא קו - למחוק
+                    if (last.typename === "PathItem" && !last.filled && !last.stroked) last.remove();
+                }
+            } catch(e){}
+        }
 
-        if (group.typename === 'GroupItem' && group.pageItems.length > 0) {
-            
-            var totalW = group.width;
-            var totalH = group.height;
-            var totalArea = totalW * totalH;
-            var detectedBgColor = null;
+        if (group.typename === 'GroupItem' && group.pageItems.length > 0) {
+            
+            var gb = group.visibleBounds; // [Left, Top, Right, Bottom]
+            var totalW = group.width;
+            var totalH = group.height;
+            var totalArea = totalW * totalH;
+            
+            var detectedBgColor = null;
+            var keepPeeling = true;
+            var safetyCounter = 0; // למנוע לולאה אינסופית
 
-            // 2. זיהוי הרקע הגדול (מעל 90%)
-            for (var i = group.pageItems.length - 1; i >= 0; i--) {
-                var item = group.pageItems[i];
-                var iArea = item.width * item.height;
-                
-                if (iArea > (totalArea * 0.90)) {
-                    // דגימת הצבע
-                    if (!detectedBgColor) {
-                        if (item.typename === 'PathItem' && item.filled) detectedBgColor = item.fillColor;
-                        else if (item.typename === 'CompoundPathItem' && item.pathItems.length > 0 && item.pathItems[0].filled) 
-                            detectedBgColor = item.pathItems[0].fillColor;
-                    }
-                    
-                    // מחיקת הרקע הגדול
-                    item.remove();
-                    
-                    break; 
-                }
-            }
+            // 2. לולאת "קילוף" - בודקים רק מלמטה!
+            while (keepPeeling && group.pageItems.length > 0 && safetyCounter < 10) {
+                
+                safetyCounter++;
+                // באילוסטרייטור: האינדקס הגבוה (length-1) הוא בדרך כלל הפריט הכי תחתון בקבוצה (Back)
+                // אבל זה תלוי איך הקובץ נבנה. בדרך כלל הסריקה היא הפוכה.
+                // בקוד הקודם עשינו i-- שזה אומר שהתחלנו מ- length-1. 
+                // לכן נבדוק את הפריט באינדקס [length-1] (הכי תחתון)
+                
+                var idx = group.pageItems.length - 1;
+                var item = group.pageItems[idx];
+                
+                var iArea = item.width * item.height;
+                var ib = item.visibleBounds;
 
-            // 3. הפעלת הניקוי העדין (רק לחלקים קטנים באותו צבע)
-            if (detectedBgColor) {
-                removeInternalParts(group, detectedBgColor);
-            }
-        }
+                // בדיקת מגע בקצוות
+                var tolerance = 2.0; 
+                var edgesTouching = 0;
+                if (Math.abs(ib[0] - gb[0]) < tolerance) edgesTouching++; // L
+                if (Math.abs(ib[1] - gb[1]) < tolerance) edgesTouching++; // T
+                if (Math.abs(ib[2] - gb[2]) < tolerance) edgesTouching++; // R
+                if (Math.abs(ib[3] - gb[3]) < tolerance) edgesTouching++; // B
 
-        // צביעה (אם נדרש)
-        if (doC === true) {
-            var c = new RGBColor(); c.red=r; c.green=g; c.blue=b;
-            try {
-                var groupRefresh = doc.pageItems.getByName(grpN);
-                if(groupRefresh) colRec(groupRefresh, c);
-            } catch(e) {}
-        }
-    } catch(e) { }
+                var isBackground = false;
+
+                // תנאי א: נוגע ב-4 קצוות (רקע מלא)
+                if (edgesTouching === 4) isBackground = true;
+
+                // תנאי ב: נוגע ב-3 קצוות (חצי רקע) - חייב להיות לפחות 20% מהשטח כדי לא למחוק פסים דקים
+                else if (edgesTouching === 3 && iArea > (totalArea * 0.20)) isBackground = true;
+
+                // תנאי ג: נוגע ב-2 קצוות - חייב להיות גדול (40%) - רקע פינתי
+                else if (edgesTouching >= 2 && iArea > (totalArea * 0.40)) isBackground = true;
+
+                // תנאי ד: ענק ללא קשר לקצוות (95%)
+                else if (iArea > (totalArea * 0.95)) isBackground = true;
+
+
+                if (isBackground) {
+                    // זיהינו רקע!
+                    
+                    // נשמור את הצבע (רק של הרקע הראשון שנמצא)
+                    if (!detectedBgColor) {
+                        if (item.typename === 'PathItem' && item.filled) detectedBgColor = item.fillColor;
+                        else if (item.typename === 'CompoundPathItem' && item.pathItems.length > 0 && item.pathItems[0].filled) 
+                            detectedBgColor = item.pathItems[0].fillColor;
+                    }
+                    
+                    // מחיקה
+                    item.remove();
+                    
+                    // ממשיכים בלולאה (keepPeeling נשאר true) כדי לבדוק את השכבה שמתחתיה שנחשפה עכשיו
+                } else {
+                    // הגענו לפריט שהוא לא רקע (למשל הלוגו)
+                    // עוצרים מיד!!
+                    keepPeeling = false;
+                }
+            }
+
+            // 3. ניקוי עדין (חורים באותיות) - רק אם זוהה צבע רקע
+            if (detectedBgColor) {
+                removeInternalParts(group, detectedBgColor);
+            }
+        }
+
+        // צביעה (אם נדרש)
+        if (doC === true) {
+            var c = new RGBColor(); c.red=r; c.green=g; c.blue=b;
+            try {
+                var groupRefresh = doc.pageItems.getByName(grpN);
+                if(groupRefresh) colRec(groupRefresh, c);
+            } catch(e) {}
+        }
+    } catch(e) { }
 }
 
 function colRec(it, c) {
-    try {
-        if (it.typename === 'GroupItem') {
-            for (var i=0; i<it.pageItems.length; i++) colRec(it.pageItems[i], c);
-        } else if (it.typename === 'PathItem' && !it.clipping) {
-            it.filled=true; it.fillColor=c; it.stroked=false;
-        } else if (it.typename === 'CompoundPathItem') {
-            for (var j=0; j<it.pathItems.length; j++) {
-                if (!it.pathItems[j].clipping) {
-                    it.pathItems[j].filled=true; it.pathItems[j].fillColor=c; it.pathItems[j].stroked=false;
-                }
-            }
-        }
-    } catch(e) { }
+    try {
+        if (it.typename === 'GroupItem') {
+            for (var i=0; i<it.pageItems.length; i++) colRec(it.pageItems[i], c);
+        } else if (it.typename === 'PathItem' && !it.clipping) {
+            it.filled=true; it.fillColor=c; it.stroked=false;
+        } else if (it.typename === 'CompoundPathItem') {
+            for (var j=0; j<it.pathItems.length; j++) {
+                if (!it.pathItems[j].clipping) {
+                    it.pathItems[j].filled=true; it.pathItems[j].fillColor=c; it.pathItems[j].stroked=false;
+                }
+            }
+        }
+    } catch(e) { }
 }
 
 try{ 
-    var isR = ("%ISRASTER%" === "true"); 
-    var doColor = ("%DOCOL%" === "true");
-    run("%LNAME%", "%GNAME%", %R%, %G%, %B%, doColor, isR); 
+    var isR = ("%ISRASTER%" === "true"); 
+    var doColor = ("%DOCOL%" === "true");
+    run("%LNAME%", "%GNAME%", %R%, %G%, %B%, doColor, isR); 
 }catch(e){}
 
 """
@@ -466,6 +508,19 @@ try {
     // שגיאה כללית (למשל שכבת Simulation חסרה)
 }
 """
+JSX_MEASURE_FINAL = """
+#target illustrator
+try {
+    var doc = app.activeDocument;
+    // מחפש את הפריט לפי השם הייחודי שנתנו לו
+    var item = doc.pageItems.getByName("%NAME%");
+    // מחזיר את הרוחב הנוכחי והאמיתי אחרי כל השינויים
+    item.width;
+} catch(e) {
+    0;
+}
+"""
+
 
 # -------------------------
 # פונקציות עזר
@@ -535,50 +590,77 @@ def update_size_label(doc, app, name, w, txt):
     run_jsx(app, jsx)
 
 def place_and_simulate_print(doc, app, path, pre, cat, p_hex, s_hex, is_raster=False):
-#                                                                    ^^^^^^^^^^^^^^^^^ 📢 הפרמטר החדש
     print(f"--- Processing {pre} ---")
     
     l_map = {"F":"Print_Front","B":"Print_Back","RS":"Print_Right_Sleeve","LS":"Print_Left_Sleeve"}
     
+    # וידוא מסמך
     doc = get_doc_safe(app)
-    if not doc: 
-        print("XXX Error: No Document Found at start.")
-        return 0
+    if not doc: return 0
 
     p_lay = get_layer(doc, l_map[pre])
     if not p_lay: return 0
 
+    unique_name_print = f"P_{pre}_{uuid.uuid4().hex[:6]}"
+    
+    # משתנה זמני לבדיקה שההטמעה הצליחה
+    initial_check_w = 0 
+
     try:
-        imported_group = p_lay.GroupItems.CreateFromFile(path)
-        clean_arts(imported_group)
+        if is_raster:
+            # --- הטמעת רסטר (תמונה) ---
+            safe_path = path.replace('\\', '\\\\') 
+            jsx_place_raster = f"""
+            #target illustrator
+            function placeRaster(filePath, layerName, itemName) {{
+                try {{
+                    var doc = app.activeDocument;
+                    var layer = doc.layers.getByName(layerName);
+                    var file = new File("{safe_path}");
+                    var placedItem = layer.placedItems.add();
+                    placedItem.file = file;
+                    placedItem.name = itemName; 
+                    try {{ placedItem.embed(); }} catch(e) {{}}
+                    return placedItem.width;
+                }} catch(e) {{ return 0; }}
+            }}
+            placeRaster('{safe_path}', '{l_map[pre]}', '{unique_name_print}');
+            """
+            raw_width = app.DoJavaScript(jsx_place_raster)
+            initial_check_w = float(raw_width)
+
+        else:
+            # --- הטמעת וקטור ---
+            imported_group = p_lay.GroupItems.CreateFromFile(path)
+            clean_arts(imported_group)
+            imported_group.Name = unique_name_print
+            initial_check_w = imported_group.Width
+
     except Exception as e:
-        print(f"Import Error: {e}")
+        print(f"Fatal Import Error: {e}")
         return 0
     
-    if not imported_group: return 0
-    
-    unique_name_print = f"P_{pre}_{uuid.uuid4().hex[:6]}"
-    imported_group.Name = unique_name_print
-    
-    do_col = 'false'
+    if initial_check_w == 0: return 0
+
+    # 1. ניקוי וצביעה
     r, g, b = (0,0,0)
-    
+    do_col = 'false'
     if p_hex:
         r, g, b = hex_to_rgb(p_hex)
         do_col = 'true'
     
-    # 1. ניקוי וצביעה
-    # 📢 שינוי: הוספת הדגל is_raster לסקריפט ה-Clean Magic
     is_raster_str = "true" if is_raster else "false"
+    
+    # מריצים את הניקוי
     sc = JSX_CLEAN_MAGIC.replace('%LNAME%', l_map[pre]).replace('%GNAME%', unique_name_print)
     sc = sc.replace('%R%', str(r)).replace('%G%', str(g)).replace('%B%', str(b))
     sc = sc.replace('%DOCOL%', do_col)
     sc = sc.replace('%ISRASTER%', is_raster_str) 
     run_jsx(app, sc)
     
-    time.sleep(0.5)
+    time.sleep(0.2)
 
-    # 2. מיקום חכם ושינוי גודל דף
+    # 2. מיקום חכם ושינוי גודל (כאן הגודל משתנה!)
     resize = "true" if cat in ["Pocket", "A4"] else "false"
     is_p = "true"
     ab_name = am.get(pre, "")
@@ -590,18 +672,8 @@ def place_and_simulate_print(doc, app, path, pre, cat, p_hex, s_hex, is_raster=F
     
     run_jsx(app, sc_pos)
     
-    # 3. חישוב רוחב
-    final_w = 0
-    try:
-        doc = get_doc_safe(app)
-        final_w = doc.PageItems(unique_name_print).Width
-        print(f"DEBUG: Width calculated: {final_w}")
-    except:
-        print("DEBUG: Could not read width, but ignoring to continue flow.")
-
-    # 4. הדמיה (שכפול)
+    # 3. הדמיה (שכפול)
     unique_name_sim = f"S_{pre}_{uuid.uuid4().hex[:6]}"
-    
     should_recolor_sim = 'false'
     rs, gs, bs = (0,0,0)
     
@@ -622,8 +694,18 @@ def place_and_simulate_print(doc, app, path, pre, cat, p_hex, s_hex, is_raster=F
     
     p_lay.Visible = True
     
-    # 5. עדכון טקסט
-    if final_w > 0:
+    # 4. === מדידה סופית ומדויקת ===
+    # אנחנו שואלים את אילוסטרייטור מה הרוחב *עכשיו*, אחרי הניקוי והשינוי גודל
+    final_true_width = 0
+    try:
+        measure_jsx = JSX_MEASURE_FINAL.replace("%NAME%", unique_name_print)
+        res = app.DoJavaScript(measure_jsx)
+        final_true_width = float(res)
+    except:
+        final_true_width = initial_check_w # גיבוי למקרה של כישלון
+
+    # 5. עדכון טקסט עם הרוחב הנכון
+    if final_true_width > 0:
         target_tf = ""
         txt_suffix = ""
         
@@ -641,10 +723,9 @@ def place_and_simulate_print(doc, app, path, pre, cat, p_hex, s_hex, is_raster=F
             txt_suffix = "שרוול שמאל"
         
         if target_tf:
-            update_size_label(doc, app, target_tf, final_w, txt_suffix)
+            update_size_label(doc, app, target_tf, final_true_width, txt_suffix)
             
-    return final_w
-
+    return final_true_width
 def open_and_color_template(path: str, hex_c: Optional[str], prod: str="Shirt"):
     print(f"--- Opening AI: {os.path.basename(path)} ---")
     app = win32com.client.Dispatch("Illustrator.Application")
