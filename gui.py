@@ -1,313 +1,152 @@
 import streamlit as st
-
 import os
-import json
 import shutil
 
-# --- תיקון: שינוי השם למילון החדש ---
+# --- ייבוא הפונקציות המעודכנות ---
+# יש לוודא שהקבצים נמצאים באותה תיקייה או בנתיב שפייתון יודע למצוא
+try:
+    from print_automation import run_illustrator_split 
+except ImportError:
+    st.error("הקובץ print_automation.py חסר!")
+    def run_illustrator_split(*args): return []
 
-from main import process_order, EXTENDED_COLOR_MAP 
+try:
+    from photoshop_automation import run_photoshop_action
+except ImportError:
+    st.error("הקובץ photoshop_automation.py חסר!")
+    def run_photoshop_action(*args): yield "DONE", "קובץ חסר"
 
+# --- יבוא נתונים נוספים ---
+try:
+    # אם יש קובץ main.py או config.py שמכיל את EXTENDED_COLOR_MAP
+    from main import EXTENDED_COLOR_MAP 
+except ImportError:
+    # ברירת מחדל אם הקובץ לא קיים
+    EXTENDED_COLOR_MAP = {"שחור": "#000000", "לבן": "#FFFFFF", "אדום": "#FF0000"}
 
-
-# --- הגדרת נתיב זמני דינמי ---
-
+# --- הגדרות ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
 UPLOAD_DIR = os.path.join(BASE_DIR, "temp_uploads")
-
-
-
-# יצירת התיקייה הזמנית אם היא לא קיימת
-
-if not os.path.exists(UPLOAD_DIR):
-
-    os.makedirs(UPLOAD_DIR)
-
-
+if not os.path.exists(UPLOAD_DIR): os.makedirs(UPLOAD_DIR)
 
 def save_uploaded_file(uploaded_file):
-
     if uploaded_file is not None:
-
         file_path = os.path.join(UPLOAD_DIR, uploaded_file.name)
-
         with open(file_path, "wb") as f:
-
             f.write(uploaded_file.getbuffer())
-
         return file_path
-
     return None
 
+# ==========================================
+# UI
+# ==========================================
+st.set_page_config(page_title="מערכת הדמיות ודפוס", layout="wide", page_icon="🖨️")
+st.title("🖨️ מערכת ניהול הדמיות וקבצי דפוס")
 
+tab1, tab2 = st.tabs(["👕 יצירת הדמיה", "✂️ פיצול והכנה לדפוס (מלא)"])
 
-def get_color_value(selection):
+# --- טאב 1 (הדמיות) - נשאר ללא שינוי ---
+with tab1:
+    col1, col2, col3 = st.columns(3)
+    with col1: order_id = st.text_input("מספר הזמנה", value="1001", key="sim_order_id")
+    with col2: product_type_heb = st.selectbox("סוג מוצר", ["חולצה", "סווטשירט", "קפוצון", "קפוצון עם רוכסן"])
+    with col3: product_color = st.selectbox("צבע המוצר", list(EXTENDED_COLOR_MAP.keys()))
+    st.markdown("---")
+    st.info("לשונית זו מפעילה את הקובץ main.py")
 
-    # התיקון: מחזירים את המילה "צבעוני" (מחרוזת) ולא None
-
-    if selection == "צבעוני (ללא שינוי)":
-
-        return "צבעוני" 
-
-    return selection
-
-
-
-st.set_page_config(page_title="מערכת הדמיות", layout="wide", page_icon="👕")
-
-st.title("👕 מערכת הדמיות אוטומטית")
-
-
-
-# אזור עליון - פרטי הזמנה
-
-col1, col2, col3 = st.columns(3)
-
-with col1:
-
-    order_id = st.text_input("מספר הזמנה", value="1001")
-
-with col2:
-
-    product_type_heb = st.selectbox("סוג מוצר", ["חולצה", "סווטשירט", "קפוצון", "קפוצון עם רוכסן"])
-
-with col3:
-
-    # --- תיקון: שימוש במילון המורחב ---
-
-    shirt_colors = list(EXTENDED_COLOR_MAP.keys())
-
-    product_color = st.selectbox("צבע המוצר", shirt_colors)
-
-
-
-prod_type_map = {"חולצה": "Shirt", "סווטשירט": "Sweater", "קפוצון": "Hoodie", "קפוצון עם רוכסן": "Zippered Hoodie"}
-
-product_type = prod_type_map[product_type_heb]
-
-
-
-st.markdown("---")
-
-
-
-def create_input_section(title, key_prefix, size_options):
-
-    st.subheader(title)
-
-    exists = st.checkbox(f"יש הדפסה ב{title}?", key=f"{key_prefix}_exists")
-
+# --- טאב 2 (התהליך המאוחד) ---
+with tab2:
+    st.header("✨ תהליך אוטומטי מלא: אילוסטרייטור + פוטושופ")
+    st.caption("התהליך כולל: פיצול קבצים, ניקוי שכבות, בדיקת צבע, ויצירת ערוץ ספוט לבן.")
     
-
-    if exists:
-
-        c1, c2, c3 = st.columns(3)
-
-        with c1:
-
-            size = st.selectbox("גודל / סוג", size_options, key=f"{key_prefix}_size")
-
-        with c2:
-
-            # --- תיקון: שימוש במילון המורחב ---
-
-            color_options = ["צבעוני (ללא שינוי)"] + list(EXTENDED_COLOR_MAP.keys())
-
-            color = st.selectbox("צבע ההדפס", color_options, key=f"{key_prefix}_color")
-
-        with c3:
-
-            uploaded_file = st.file_uploader(f"העלאת קובץ", type=['jpg', 'jpeg', 'png', 'svg'], key=f"{key_prefix}_file")
-
-        
-
-        return {
-
-            'exists': True,
-
-            'size': size,
-
-            'color': get_color_value(color),
-
-            'file': uploaded_file
-
-        }
-
-    else:
-
-        return {'exists': False}
-
-
-
-# הגדרת האזורים
-
-front_data = create_input_section("צד קידמי", "F", ["סמל כיס", "A4", "A3"])
-
-back_data = create_input_section("צד אחורי", "B", ["A4", "A3"])
-
-rs_data = create_input_section("שרוול ימין", "RS", ["9 ס\"מ"])
-
-ls_data = create_input_section("שרוול שמאל", "LS", ["9 ס\"מ"])
-
-
-
-st.markdown("---")
-
-
-
-if st.button("🚀 צור הדמיה והדפסה", type="primary"):
-
-    if not order_id:
-
-        st.error("חובה להזין מספר הזמנה")
-
-    else:
-
-        def map_category(ui_size):
-
-            if ui_size == "סמל כיס": return "Pocket"
-
-            if ui_size == "9 ס\"מ": return "Sleeve"
-
-            return ui_size
-
-
-
-        # בניית אובייקט ההזמנה
-
-        order_obj = {
-
-            'order_id': order_id,
-
-            'product_type': product_type,
-
-            'product_color_hebrew': product_color,
-
-            'front': {
-
-                'exists': front_data['exists'],
-
-                'file': save_uploaded_file(front_data.get('file')),
-
-                'category': map_category(front_data.get('size')),
-
-                'prefix': 'F',
-
-                'label': 'size_Front', 'heb': 'קידמי',
-
-                'req_color_hebrew': front_data.get('color')
-
-            },
-
-            'back': {
-
-                'exists': back_data['exists'],
-
-                'file': save_uploaded_file(back_data.get('file')),
-
-                'category': map_category(back_data.get('size')),
-
-                'prefix': 'B',
-
-                'label': 'size_Back', 'heb': 'אחורי',
-
-                'req_color_hebrew': back_data.get('color')
-
-            },
-
-            'right_sleeve': {
-
-                'exists': rs_data['exists'],
-
-                'file': save_uploaded_file(rs_data.get('file')),
-
-                'category': 'Sleeve',
-
-                'prefix': 'RS',
-
-                'label': 'size_RS', 'heb': 'שרוול ימין',
-
-                'req_color_hebrew': rs_data.get('color')
-
-            },
-
-            'left_sleeve': {
-
-                'exists': ls_data['exists'],
-
-                'file': save_uploaded_file(ls_data.get('file')),
-
-                'category': 'Sleeve',
-
-                'prefix': 'LS',
-
-                'label': 'size_LS', 'heb': 'שרוול שמאל',
-
-                'req_color_hebrew': ls_data.get('color')
-
-            }
-
-        }
-
-
-
-        # בדיקת תקינות
-
-        valid = True
-
-        for key in ['front', 'back', 'right_sleeve', 'left_sleeve']:
-
-            if order_obj[key]['exists'] and not order_obj[key]['file']:
-
-                st.error(f"חסר קובץ עבור {order_obj[key]['heb']}")
-
-                valid = False
-
-        
-
-        if valid:
-
-            with st.spinner('מעבד את ההזמנה...'):
-
-                try:
-
-                    process_order(order_obj)
+    # 1. קלטים בסיסיים
+    col_input, col_file = st.columns(2)
+    with col_input:
+        split_order_id = st.text_input("מספר הזמנה", value="", key="split_order_id")
+    with col_file:
+        source_pdf = st.file_uploader("העלה קובץ PDF/AI מקור", type=['pdf', 'ai'], key="source_pdf")
+    
+    st.markdown("---")
+    
+    # 2. בחירת הגדרות לוגו (לפני שמתחילים!)
+    st.subheader("⚙️ הגדרות לוגו (עבור ספוט לבן)")
+    col_opt1, col_opt2 = st.columns(2)
+    with col_opt1:
+        contract_choice = st.radio("בחר עובי לוגו:", 
+                                   ["לוגו רגיל/עבה (כיווץ 2px)", "לוגו דק/עדין (כיווץ 1px)"], 
+                                   index=0)
+    
+    # המרת הבחירה למספר
+    contract_px = 2 if "2px" in contract_choice else 1
+
+    st.markdown("---")
+
+    # 3. כפתור ההפעלה
+    if st.button("🚀 בצע תהליך מלא (Illustrator + Photoshop)", type="primary"):
+        if not split_order_id or not source_pdf:
+            st.error("נא להזין מספר הזמנה ולהעלות קובץ.")
+        else:
+            temp_pdf_path = save_uploaded_file(source_pdf)
+            
+            # איזור תצוגה
+            st.info("מתחיל תהליך... נא לא לגעת במקלדת ובעכבר.")
+            main_progress = st.progress(0)
+            status_text = st.empty()
+            
+            final_folder = None
+            files_list = []
+            
+            try:
+                # ==========================
+                # שלב א': אילוסטרייטור
+                # ==========================
+                status_text.text("🟠 שלב 1/2: מפעיל אילוסטרייטור (פיצול וניקוי)...")
+                
+                ill_runner = run_illustrator_split(temp_pdf_path, split_order_id)
+                
+                for data in ill_runner:
+                    if isinstance(data[0], str) and data[0] == "DONE":
+                        final_folder, files_list = data[1]
+                    else:
+                        # עדכון פרוגרס בר (0% עד 50% מהתהליך הכולל)
+                        prog, txt = data
+                        main_progress.progress(int(prog * 0.5 * 100)) 
+                        status_text.text(f"Illustrator: {txt}")
+
+                # ==========================
+                # שלב ב': פוטושופ
+                # ==========================
+                if files_list: # רק אם אילוסטרייטור יצר קבצים
+                    status_text.text("🔵 שלב 2/2: מפעיל פוטושופ (יצירת ספוט לבן)...")
+                    
+                    # *********** שימו לב: כאן נכנסת רשימת הקבצים המלאה ***********
+                    ps_runner = run_photoshop_action(files_list, contract_px) 
+                    
+                    for data in ps_runner:
+                        if isinstance(data[0], str) and data[0] == "DONE":
+                            pass # סיימנו
+                        else:
+                            # עדכון פרוגרס בר (50% עד 100% מהתהליך הכולל)
+                            prog, txt = data
+                            combined_prog = 0.5 + (prog * 0.5)
+                            main_progress.progress(combined_prog)
+                            status_text.text(f"Photoshop: {txt}")
+                    
+                    # סיום מוצלח
+                    main_progress.progress(100)
                     st.balloons()
-                    st.success(f"✅ ההזמנה {order_id} בוצעה בהצלחה!")
-                    
-                    # --- התיקון: חישוב השם הקצר גם לתצוגה ---
-                    short_id_display = str(order_id)[-4:]
-                    # ----------------------------------------
+                    st.success(f"✅ התהליך הושלם בהצלחה!")
+                    if final_folder:
+                        st.write(f"📂 הקבצים נשמרו בתיקייה: `{final_folder}`")
+                    st.write(f"📄 קבצים שטופלו: {', '.join([os.path.basename(f) for f in files_list])}")
+                
+                else:
+                    st.warning("אילוסטרייטור סיים אך לא נוצרו קבצים (אולי השכבות היו ריקות?), ולכן פוטושופ לא הופעל.")
 
-                    # הצגת הנתיב החדש
-                    try:
-                        with open('config.json', 'r', encoding='utf-8') as f:
-                            config = json.load(f)
-                            root_save_folder = config.get('save_folder_path', "Documents/Auto_Print_Output")
-                    except:
-                        root_save_folder = os.path.join(os.path.expanduser("~"), "Documents", "Auto_Print_Output")
-                    
-                    # שימוש בשם הקצר בנתיב שהמשתמש רואה
-                    final_save_path = os.path.join(root_save_folder, short_id_display)
-                    
-                    st.info(f"הקובץ נשמר בתיקייה: {final_save_path}")
-                    # הצגת הנתיב החדש (ללא תאריך)
-
-                    save_path = os.path.join(os.path.expanduser("~"), "Documents", "Auto_Print_Output", order_id)
-
-                    st.info(f"הקובץ נשמר בתיקייה: {save_path}")
-
-                    
-
-                    # ניקוי תיקייה זמנית
-
-                    if os.path.exists(UPLOAD_DIR):
-
-                        shutil.rmtree(UPLOAD_DIR)
-
-                        os.makedirs(UPLOAD_DIR)
-
-                except Exception as e:
-
-                    st.error(f"שגיאה: {e}")
+            except Exception as e:
+                st.error(f"❌ שגיאה במהלך התהליך: {e}")
+            
+            # ניקוי קובץ זמני
+            if os.path.exists(temp_pdf_path):
+                try: os.remove(temp_pdf_path)
+                except: pass
