@@ -118,8 +118,7 @@ app.get('/', (req, res) => res.send('המערכת מחוברת 🚀'));
 
 // === כפתור ורוד: הכנת קבצי הדפסה ===
 
-// ... (כל החלק העליון של הקובץ נשאר אותו דבר עד ל-app.post) ...
-
+// === כפתור ורוד: הכנת קבצי הדפסה ===
 app.post('/prepare-print', async (req, res) => {
     let { orderId, fileUrl, thickness } = req.body;
     console.log(`\n🌸 בקשה להכנת דפוס: הזמנה ${orderId}`);
@@ -154,15 +153,19 @@ app.post('/prepare-print', async (req, res) => {
         console.log(`הקובץ ירד. מפעיל עיבוד (פייתון)...`);
         
         const pythonScriptPath = path.join(__dirname, 'prepare_print.py');
-        // הפעלת התהליך
-        const pythonProcess = spawn('python', [pythonScriptPath, localFilePath, orderId, thickness]);
-        shell: true // הוספת shell: true עוזרת למערכת למצוא את פייתון בקלות יותר
         
-        // איסוף לוגים לצורך ניפוי שגיאות
+        // --- תיקון נתיב הפייתון לשימוש ב-VENV (חיוני!) ---
+        const venvPythonPath = path.join(__dirname, 'venv', 'Scripts', 'python.exe');
+        const pythonExe = fs.existsSync(venvPythonPath) ? venvPythonPath : 'python';
+
+        // הפעלת התהליך עם תיקון ה-shell
+        const pythonProcess = spawn(pythonExe, [pythonScriptPath, localFilePath, orderId, thickness], {
+            shell: true
+        });
+        
         pythonProcess.stdout.on('data', (data) => console.log(`[Python]: ${data}`));
         pythonProcess.stderr.on('data', (data) => console.error(`[Error]: ${data}`));
 
-        // --- כאן התיקון הקריטי: השרת "מחזיק" את הבקשה פתוחה עד שפייתון מסיים ---
         pythonProcess.on('close', (code) => {
             console.log(`תהליך פייתון הסתיים עם קוד: ${code}`);
             
@@ -170,7 +173,6 @@ app.post('/prepare-print', async (req, res) => {
             try { if (fs.existsSync(localFilePath)) fs.unlinkSync(localFilePath); } catch(e) {}
             
             if (code === 0) {
-                // רק עכשיו שולחים את התשובה לאתר
                 res.json({ success: true, message: "הקבצים מוכנים!" });
             } else {
                 res.status(500).json({ success: false, message: "עיבוד הפייתון נכשל" });
@@ -182,10 +184,6 @@ app.post('/prepare-print', async (req, res) => {
         res.status(500).json({ success: false, message: "תקלה בהורדה או בהפעלה" });
     }
 });
-
-// ... (שאר הקובץ נשאר אותו דבר) ...
-
-
 
 // === כפתור סגול: הדמיה ===
 
