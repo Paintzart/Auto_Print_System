@@ -70,9 +70,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 # נניח שהייבוא הבא קיים ועדכני
 
 
-from illustrator_ops import open_and_color_template, place_and_simulate_print, update_size_label, delete_side_assets, save_pdf, clean_layout, apply_extra_colors
-
-
+from illustrator_ops import run_jsx, open_and_color_template, place_and_simulate_print, update_size_label, delete_side_assets, save_pdf, clean_layout, apply_extra_colors
 from vectorizer_ops import convert_to_svg
 
 
@@ -806,12 +804,12 @@ def clean_temp_folder():
         print(f"Warning: Could not clean temp folder: {e}")
 
 
+# בראש הקובץ - ייבוא מתוקן שכולל את run_jsx
 def process_order(order: Dict[str, Any]):
     pythoncom.CoInitialize() 
     doc = None
     app = None
-    # הגדרת ברירת מחדל למניעת שגיאות ב-IDE
-    col = "#000000" 
+    col = "#000000" # הגדרת ברירת מחדל למניעת שגיאות IDE
     
     try:
         oid = str(order['order_id'])
@@ -835,41 +833,26 @@ def process_order(order: Dict[str, Any]):
             for f in concurrent.futures.as_completed(fs):
                 svgs[fs[f]] = f.result()
 
-        if IS_TEST_MODE:
-            print("--- TEST MODE ON ---")
-
         # --- טיפול בצבעים ---
-        try:
-            col_raw = order.get('product_color_hebrew', "")
-            color_parts = [p.strip() for p in col_raw.split("-")] if col_raw and "-" in col_raw else [col_raw]
-            
-            h1 = get_hex_smart(color_parts[0])
-            h2 = get_hex_smart(color_parts[1]) if len(color_parts) >= 2 else h1
-            is_split = len(color_parts) >= 2
-            
-            col = h1 # משתנה עבור resolve_print_color בהמשך
+        col_raw = order.get('product_color_hebrew', "")
+        color_parts = [p.strip() for p in col_raw.split("-")] if col_raw and "-" in col_raw else [col_raw]
+        h1 = get_hex_smart(color_parts[0])
+        h2 = get_hex_smart(color_parts[1]) if len(color_parts) >= 2 else h1
+        is_split = len(color_parts) >= 2
+        col = h1 
 
-            doc, app = open_and_color_template(t_path, h1, h2, is_split, prod)
+        doc, app = open_and_color_template(t_path, h1, h2, is_split, prod)
 
-            # ריבועי צבעים למעלה
-            extra_heb_names = order.get('extra_colors_hebrew', [])
-            extra_data_list = [] 
-
-            if extra_heb_names:
-                for name in extra_heb_names:
-                    parts = [p.strip() for p in name.split("-")] if "-" in name else [name]
-                    color_pair = []
-                    for p in parts[:2]:
-                        h = get_hex_smart(p)
-                        if h and h != 'ORIGINAL':
-                            color_pair.append(h)
-                    if color_pair:
-                        extra_data_list.append(color_pair)
-            
-            apply_extra_colors(app, extra_data_list)
-
-        except Exception as color_error:
-            print(f"X Color Processing Error: {color_error}")
+        # צבעים נוספים לריבועים
+        extra_heb_names = order.get('extra_colors_hebrew', [])
+        extra_data_list = [] 
+        if extra_heb_names:
+            for name in extra_heb_names:
+                parts = [p.strip() for p in name.split("-")] if "-" in name else [name]
+                color_pair = [get_hex_smart(p) for p in parts[:2] if get_hex_smart(p) and get_hex_smart(p) != 'ORIGINAL']
+                if color_pair: extra_data_list.append(color_pair)
+        
+        apply_extra_colors(app, extra_data_list)
 
         # --- הרצת הסימולציה לכל צד ---
         for s in sides:
@@ -877,17 +860,32 @@ def process_order(order: Dict[str, Any]):
             if d.get('exists') and svgs.get(s):
                 is_raster = d.get('no_vectorization', False)
                 final_color = resolve_print_color(d.get('req_color_hebrew'), col)
-                
                 cs = final_color
-                cp = final_color
-                if final_color == '#FFFFFF':
-                    cp = '#000000'
-
+                cp = final_color if final_color != '#FFFFFF' else '#000000'
                 w = place_and_simulate_print(doc, app, svgs[s], d['prefix'], d['category'], cp, cs, is_raster=is_raster)
                 if w > 0: 
                     update_size_label(doc, app, d['label'], w, d.get('heb', ''))
 
-        print("Cleaning up sizing boxes...")
+        # === לוגיקת ניקוי (תיקון למחיקת עמודים וכיתובים חסרים) ===
+        print("Cleaning up unused artboards and labels...")
+        rs_exists = order.get('right_sleeve', {}).get('exists', False)
+        ls_exists = order.get('left_sleeve', {}).get('exists', False)
+
+        # בדיקת שרוולים
+        if not rs_exists and not ls_exists:
+            delete_side_assets(doc, app, "Print_Sleeves", "size_Right_Sleeve")
+            run_jsx(app, "try{app.activeDocument.textFrames.getByName('size_Left_Sleeve').remove();}catch(e){}")
+        elif not rs_exists:
+            run_jsx(app, "try{app.activeDocument.textFrames.getByName('size_Right_Sleeve').remove();}catch(e){}")
+        elif not ls_exists:
+            run_jsx(app, "try{app.activeDocument.textFrames.getByName('size_Left_Sleeve').remove();}catch(e){}")
+
+        # בדיקת קדימה / אחורה
+        if not order.get('front', {}).get('exists'):
+            delete_side_assets(doc, app, "Print_Front", "size_Front")
+        if not order.get('back', {}).get('exists'):
+            delete_side_assets(doc, app, "Print_Back", "size_Back")
+
         clean_layout(app)
         base_pdf_path = os.path.join(folder, f"{short_name}.pdf")
         final_pdf_path = get_unique_filename(base_pdf_path)
@@ -899,11 +897,9 @@ def process_order(order: Dict[str, Any]):
         if app: 
             try: app.Quit()
             except: pass
-            
     finally:
         clean_temp_folder()
         pythoncom.CoUninitialize()
-
 
 # --- נקודת הכניסה ---
 

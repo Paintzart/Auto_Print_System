@@ -1206,65 +1206,40 @@ JSX_EXTRA_COLORS = """
 #target illustrator
 try {
     var doc = app.activeDocument;
-    var simLayer = doc.layers.getByName("Simulation");
     var container = null;
-    try { container = simLayer.groupItems.getByName("Box_Color"); } catch(e) {}
-    if (!container) { try { container = simLayer.layers.getByName("Box_Color"); } catch(e) {} }
+    try { container = doc.layers.getByName("Simulation").groupItems.getByName("Box_Color"); } catch(e) {}
+    if (!container) try { container = doc.layers.getByName("Simulation").layers.getByName("Box_Color"); } catch(e) {}
 
     if (container) {
         var allData = %COLOR_ARRAY%; 
-
-        function applyFillAndBlackStroke(item, rgb) {
-            var c = new RGBColor();
-            c.red = rgb[0]; c.green = rgb[1]; c.blue = rgb[2];
-            var black = new RGBColor();
-            black.red = 0; black.green = 0; black.blue = 0;
-
-            item.filled = true; 
-            item.fillColor = c;
-            item.stroked = true; 
-            item.strokeColor = black; 
-            item.strokeWidth = 0.5;
+        function applyStyle(item, rgb) {
+            var c = new RGBColor(); c.red = rgb[0]; c.green = rgb[1]; c.blue = rgb[2];
+            var black = new RGBColor(); black.red = 0; black.green = 0; black.blue = 0;
+            item.filled = true; item.fillColor = c;
+            item.stroked = true; item.strokeColor = black; item.strokeWidth = 0.5;
         }
 
-        if (allData.length === 0) {
-            container.remove();
-        } else {
-            for (var i = 1; i <= 24; i++) {
-                try {
-                    var box = container.pageItems.getByName("Color_" + i);
-                    
-                    if (i <= allData.length) {
-                        var colors = allData[i-1]; 
+        for (var i = 1; i <= 24; i++) {
+            try {
+                var box = container.pageItems.getByName("Color_" + i);
+                if (i <= allData.length) {
+                    var colors = allData[i-1]; 
+                    if (colors.length === 1) {
+                        applyStyle(box, colors[0]);
+                    } else if (colors.length >= 2) {
+                        // שימוש ב-geometricBounds לדיוק מתמטי (ללא ה-Stroke בחישוב)
+                        var b = box.geometricBounds; 
+                        var left = b[0]; var top = b[1]; var right = b[2]; var bottom = b[3];
+                        var w = right - left; var h = top - bottom;
                         
-                        if (colors.length === 1) {
-                            // צבע יחיד - תמיד מסגרת שחורה
-                            applyFillAndBlackStroke(box, colors[0]);
-                        } 
-                        else if (colors.length >= 2) {
-                            // צבע כפול - יצירה מחדש של 2 חצאים מדוייקים
-                            var b = box.visibleBounds; // [L, T, R, B]
-                            var left = b[0]; var top = b[1]; var right = b[2]; var bottom = b[3];
-                            var width = right - left;
-                            var height = top - bottom;
-                            var parent = box.parent;
-
-                            // יצירת חצי שמאל
-                            var leftRect = parent.pathItems.rectangle(top, left, width/2, height);
-                            applyFillAndBlackStroke(leftRect, colors[0]);
-                            
-                            // יצירת חצי ימין
-                            var rightRect = parent.pathItems.rectangle(top, left + width/2, width/2, height);
-                            applyFillAndBlackStroke(rightRect, colors[1]);
-
-                            // מחיקת הריבוע המקורי
-                            box.remove();
-                        }
-                    } else {
+                        var leftRect = box.parent.pathItems.rectangle(top, left, w/2, h);
+                        applyStyle(leftRect, colors[0]);
+                        var rightRect = box.parent.pathItems.rectangle(top, left + w/2, w/2, h);
+                        applyStyle(rightRect, colors[1]);
                         box.remove();
                     }
-                } catch(e) {}
-            }
+                } else { box.remove(); }
+            } catch(e) {}
         }
     }
 } catch(e) {}
@@ -2229,118 +2204,17 @@ def clean_layout(app):
 
     run_jsx(app, JSX_CLEAN_BOXES)
 
-
-
-def apply_extra_colors(app, hex_data: list):
+def apply_extra_colors(app, extra_data_list: list):
     import json
-    if not hex_data: hex_data = []
+    # וודאי שאין שימוש בשם hex_list אם הוא לא הוגדר
+    if not extra_data_list:
+        extra_data_list = []
     
-    formatted_rgb_data = []
-    for pair in hex_data:
+    formatted_rgb = []
+    for pair in extra_data_list:
         rgb_pair = [list(hex_to_rgb(h)) for h in pair]
-        formatted_rgb_data.append(rgb_pair)
+        formatted_rgb.append(rgb_pair)
 
-    # יצירת מחרוזת JSON של המערך המורכב [[[r,g,b]], [[r,g,b],[r,g,b]]]
-    rgb_json = json.dumps(formatted_rgb_data)
-
+    rgb_json = json.dumps(formatted_rgb)
     final_jsx = JSX_EXTRA_COLORS.replace("%COLOR_ARRAY%", rgb_json)
-    run_jsx(app, final_jsx)
-    """
-    מקבלת רשימה של רשימות: [[h1], [h1, h2], [h1]]
-    ממירה אותם למבנה RGB שה-JSX מבין.
-    """
-    import json
-    if hex_data is None: hex_data = []
-    
-    formatted_colors = []
-    for entry in hex_data:
-        rgb_entry = []
-        for h in entry:
-            rgb_entry.append(list(hex_to_rgb(h)))
-        formatted_colors.append(rgb_entry)
-
-    # המרה לטקסט JSON שה-JSX יכול לקרוא כמערך רב-מימדי
-    rgb_array_str = json.dumps(formatted_colors)
-
-    final_jsx = JSX_EXTRA_COLORS.replace("%COLOR_ARRAY%", rgb_array_str)
-    run_jsx(app, final_jsx)
-
-
-
-    """ מקבלת רשימה של קודי HEX לצבעים נוספים.
-
-
-
-    מטפלת בתיקייה Box_Color: מוחקת אותה אם הרשימה ריקה, או צובעת את הריבועים אם יש תוכן."""
-
-
-
-    if hex_list is None:
-
-
-
-        hex_list = []
-
-
-
-        
-
-
-
-    # המרת רשימת ה-HEX לרשימה של [r, g, b] עבור הסקריפט
-
-
-
-    rgb_array_str = "["
-
-
-
-    for h in hex_list:
-
-
-
-        if h:
-
-
-
-            r, g, b = hex_to_rgb(h)
-
-
-
-            rgb_array_str += f"[{r},{g},{b}],"
-
-
-
-        
-
-
-
-    # סגירת המערך (מחיקת הפסיק האחרון אם יש)
-
-
-
-    if rgb_array_str.endswith(","):
-
-
-
-        rgb_array_str = rgb_array_str[:-1]
-
-
-
-    rgb_array_str += "]"
-
-
-
-
-
-
-
-    # הרצת הסקריפט
-
-
-
-    final_jsx = JSX_EXTRA_COLORS.replace("%COLOR_ARRAY%", rgb_array_str)
-
-
-
     run_jsx(app, final_jsx)
