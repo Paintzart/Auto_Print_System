@@ -1,5 +1,5 @@
-pywin32
-requests
-pymupdf
-streamlit
+pywin32
+requests
+pymupdf
+streamlit
 pillow
