@@ -10,7 +10,25 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 """
+
+
+
+
+
+
 
 
 
@@ -22,13 +40,37 @@ main.py - רץ על תיקים עם הזמנות
 
 
 
+
+
+
+
+
+
 גרסה ניידת - שומרת בתיקיית המסמכים
 
 
 
 
 
+
+
+
+
+
+
 """
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -46,7 +88,19 @@ from __future__ import annotations
 
 
 
+
+
+
+
+
+
 import os
+
+
+
+
+
+
 
 
 
@@ -58,7 +112,19 @@ import shutil
 
 
 
+
+
+
+
+
+
 import datetime
+
+
+
+
+
+
 
 
 
@@ -70,7 +136,19 @@ import sys
 
 
 
+
+
+
+
+
+
 import concurrent.futures
+
+
+
+
+
+
 
 
 
@@ -82,7 +160,19 @@ import pythoncom
 
 
 
+
+
+
+
+
+
 import json
+
+
+
+
+
+
 
 
 
@@ -94,13 +184,31 @@ import difflib
 
 
 
+
+
+
+
+
+
 import requests 
 
 
 
 
 
+
+
+
+
+
+
 import base64
+
+
+
+
+
+
 
 
 
@@ -118,7 +226,25 @@ from typing import Dict, Any, Optional
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 # הגדרת קידוד פלט לוודא עברית תקינה בלוגים
+
+
+
+
+
+
 
 
 
@@ -136,7 +262,25 @@ sys.stdout.reconfigure(encoding='utf-8')
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 # נניח שהייבוא הבא קיים ועדכני
+
+
+
+
+
+
 
 
 
@@ -144,7 +288,21 @@ sys.stdout.reconfigure(encoding='utf-8')
 
 from illustrator_ops import run_jsx, open_and_color_template, place_and_simulate_print, update_size_label, delete_side_assets, save_pdf, clean_layout, apply_extra_colors
 
+
+
 from vectorizer_ops import convert_to_svg
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -162,7 +320,19 @@ from vectorizer_ops import convert_to_svg
 
 
 
+
+
+
+
+
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+
+
+
+
 
 
 
@@ -180,7 +350,25 @@ TEMP_DOWNLOAD_DIR = os.path.join(BASE_DIR, "temp_downloads") # תיקייה זמ
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 # === השינוי מתחיל כאן ===
+
+
+
+
+
+
 
 
 
@@ -192,7 +380,19 @@ try:
 
 
 
+
+
+
+
+
+
     with open('config.json', 'r', encoding='utf-8') as f:
+
+
+
+
+
+
 
 
 
@@ -204,7 +404,19 @@ try:
 
 
 
+
+
+
+
+
+
     
+
+
+
+
+
+
 
 
 
@@ -216,7 +428,19 @@ try:
 
 
 
+
+
+
+
+
+
     # אם כתוב נתיב בקובץ - ניקח אותו. אם לא - נלך למסמכים
+
+
+
+
+
+
 
 
 
@@ -228,13 +452,37 @@ try:
 
 
 
+
+
+
+
+
+
     SAVE_FOLDER = config.get('save_folder_path', default_docs) 
 
 
 
 
 
+
+
+
+
+
+
     IS_TEST_MODE = config.get('is_test_mode', False)
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -258,7 +506,25 @@ try:
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 except FileNotFoundError:
+
+
+
+
+
+
 
 
 
@@ -270,7 +536,19 @@ except FileNotFoundError:
 
 
 
+
+
+
+
+
+
     SAVE_FOLDER = os.path.join(os.path.expanduser("~"), "Documents", "Auto_Print_Output")
+
+
+
+
+
+
 
 
 
@@ -288,7 +566,25 @@ except FileNotFoundError:
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 # עדכון הנתיב הראשי לפי מה שיצא לנו למעלה
+
+
+
+
+
+
 
 
 
@@ -306,7 +602,25 @@ ORDERS_ROOT_DIR = SAVE_FOLDER
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 if not os.path.exists(ORDERS_ROOT_DIR):
+
+
+
+
+
+
 
 
 
@@ -324,7 +638,25 @@ if not os.path.exists(ORDERS_ROOT_DIR):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 if not os.path.exists(TEMP_DOWNLOAD_DIR):
+
+
+
+
+
+
 
 
 
@@ -342,111 +674,239 @@ if not os.path.exists(TEMP_DOWNLOAD_DIR):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 TEMPLATES = {
+
+
 
     '90 Bag': os.path.join(BASE_DIR, 'Simulations', '90 Bag.ai'),
 
+
+
     '50 Bag': os.path.join(BASE_DIR, 'Simulations', '50 Bag.ai'),
+
+
 
     '30 Bag': os.path.join(BASE_DIR, 'Simulations', '30 Bag.ai'),
 
+
+
     'Bandana Cap': os.path.join(BASE_DIR, 'Simulations', 'Bandana Cap.ai'),
+
+
 
     'Baby Bodysuit': os.path.join(BASE_DIR, 'Simulations', 'Baby Bodysuit.ai'),
 
+
+
     'Apron': os.path.join(BASE_DIR, 'Simulations', 'Apron.ai'),
+
+
 
     'Buff': os.path.join(BASE_DIR, 'Simulations', 'Buff.ai'),
 
+
+
     'Boxers': os.path.join(BASE_DIR, 'Simulations', 'Boxers.ai'),
+
+
 
     'Beanie': os.path.join(BASE_DIR, 'Simulations', 'Beanie.ai'),
 
+
+
     'Chef Jacket': os.path.join(BASE_DIR, 'Simulations', 'Chef Jacket.ai'),
+
+
 
     'Cargo Pants': os.path.join(BASE_DIR, 'Simulations', 'Cargo Pants.ai'),
 
+
+
     'Canvas Bag': os.path.join(BASE_DIR, 'Simulations', 'Canvas Bag.ai'),
+
+
 
     'Flag 80-110': os.path.join(BASE_DIR, 'Simulations', 'Flag 80-110.ai'),
 
+
+
     'Fashion Vest': os.path.join(BASE_DIR, 'Simulations', 'Fashion Vest.ai'),
+
+
 
     'Drawstring Bag': os.path.join(BASE_DIR, 'Simulations', 'Drawstring Bag.ai'),
 
+
+
     'Fleece1': os.path.join(BASE_DIR, 'Simulations', 'Fleece1.ai'),
+
+
 
     'Fleece Blanket': os.path.join(BASE_DIR, 'Simulations', 'Fleece Blanket.ai'),
 
+
+
     'Flag 150-100': os.path.join(BASE_DIR, 'Simulations', 'Flag 150-100.ai'),
+
+
 
     'High Visibility Vest': os.path.join(BASE_DIR, 'Simulations', 'High Visibility Vest.ai'),
 
+
+
     'Hat': os.path.join(BASE_DIR, 'Simulations', 'Hat.ai'),
+
+
 
     'Fleece2': os.path.join(BASE_DIR, 'Simulations', 'Fleece2.ai'),
 
+
+
     'Kippah': os.path.join(BASE_DIR, 'Simulations', 'Kippah.ai'),
+
+
 
     'Hoodie': os.path.join(BASE_DIR, 'Simulations', 'Hoodie.ai'),
 
+
+
     'Hoodie T-shirt': os.path.join(BASE_DIR, 'Simulations', 'Hoodie T-shirt.ai'),
+
+
 
     'Long Baby Bodysuit': os.path.join(BASE_DIR, 'Simulations', 'Long Baby Bodysuit.ai'),
 
+
+
     'Legionnaire Hat': os.path.join(BASE_DIR, 'Simulations', 'Legionnaire Hat.ai'),
+
+
 
     'Lab Coat': os.path.join(BASE_DIR, 'Simulations', 'Lab Coat.ai'),
 
+
+
     'Long Short': os.path.join(BASE_DIR, 'Simulations', 'Long Short.ai'),
+
+
 
     'Long Polo': os.path.join(BASE_DIR, 'Simulations', 'Long Polo.ai'),
 
+
+
     'Long Chef Jacket': os.path.join(BASE_DIR, 'Simulations', 'Long Chef Jacket.ai'),
+
+
 
     'Overalls': os.path.join(BASE_DIR, 'Simulations', 'Overalls.ai'),
 
+
+
     'Neck Warmer': os.path.join(BASE_DIR, 'Simulations', 'Neck Warmer.ai'),
+
+
 
     'Mesh Laundry Basket': os.path.join(BASE_DIR, 'Simulations', 'Mesh Laundry Basket.ai'),
 
+
+
     'Laundry Basket': os.path.join(BASE_DIR, 'Simulations', 'Laundry Basket.ai'),
+
+
 
     'Scarf': os.path.join(BASE_DIR, 'Simulations', 'Scarf.ai'),
 
+
+
     'Raglan Shirt': os.path.join(BASE_DIR, 'Simulations', 'Raglan Shirt.ai'),
+
+
 
     'Polo': os.path.join(BASE_DIR, 'Simulations', 'Polo.ai'),
 
+
+
     'Sweater': os.path.join(BASE_DIR, 'Simulations', 'Sweater.ai'),
+
+
 
     'Softshell': os.path.join(BASE_DIR, 'Simulations', 'Softshell.ai'),
 
+
+
     'Short': os.path.join(BASE_DIR, 'Simulations', 'Short.ai'),
+
+
 
     'Triangular Bandana': os.path.join(BASE_DIR, 'Simulations', 'Triangular Bandana.ai'),
 
+
+
     'Tactical Vest': os.path.join(BASE_DIR, 'Simulations', 'Tactical Vest.ai'),
+
+
 
     'Sweatpants': os.path.join(BASE_DIR, 'Simulations', 'Sweatpants.ai'),
 
+
+
     'Zippered Hoodie': os.path.join(BASE_DIR, 'Simulations', 'Zippered Hoodie.ai'),
+
+
 
     'Wide Brimmed Hat': os.path.join(BASE_DIR, 'Simulations', 'Wide Brimmed Hat.ai'),
 
+
+
     'Undershirt': os.path.join(BASE_DIR, 'Simulations', 'Undershirt.ai'),
 
+
+
     'Mesh hat': os.path.join(BASE_DIR, 'Simulations', 'Mesh hat.ai'),
+
+
 
     'Combined hat': os.path.join(BASE_DIR, 'Simulations', 'Combined hat.ai'),
 
 
 
+
+
+
+
     # ברירת מחדל למקרה של "Shirt"
+
+
 
     'Shirt': os.path.join(BASE_DIR, 'Simulations', 'Short.ai'), 
 
+
+
 }
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -464,7 +924,19 @@ TEMPLATES = {
 
 
 
+
+
+
+
+
+
 API_ID = "vkd2vcts24ywdpk"
+
+
+
+
+
+
 
 
 
@@ -482,7 +954,25 @@ API_SECRET = "r20rqffqdcv6vj0ahukmiu9i8ma6ur4g0e1a5o9c7vugsoracpk8"
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 # --- מילון צבעים מורחב (השארתי את הנתונים שלך) ---
+
+
+
+
+
+
 
 
 
@@ -494,7 +984,19 @@ EXTENDED_COLOR_MAP = {
 
 
 
+
+
+
+
+
+
     'צבעוני': 'ORIGINAL', 'מקורי': 'ORIGINAL', 'ללא שינוי': 'ORIGINAL', 'צבעוני (ללא שינוי)': 'ORIGINAL',
+
+
+
+
+
+
 
 
 
@@ -506,7 +1008,19 @@ EXTENDED_COLOR_MAP = {
 
 
 
+
+
+
+
+
+
     'זהב': '#FFD700', 'גולד': '#FFD700', 'כסף': '#C0C0C0', 'סילבר': '#C0C0C0', 'ברונזה': '#CD7F32',
+
+
+
+
+
+
 
 
 
@@ -518,55 +1032,27 @@ EXTENDED_COLOR_MAP = {
 
 
 
+
+
+
+
+
+
     'אפור': '#808080', 'אפור מלנץ': '#b3b3b3', 'אפור מלנץ\'': '#b3b3b3', 'מלנץ': '#b3b3b3',
-
-
-
-
-
     'אנטרציט': '#36454F', 'אפור עכבר': '#4d4d4d', 'גרפיט': '#383838',
-
-
-
-
-
     'כאמל': '#c2b59b', 'קאמל': '#c2b59b', 'חאקי': '#c2b59b', 'שמנת': '#FFFDD0',
-
-
-
-
-
     'בז': '#F5F5DC', 'בז\'': '#F5F5DC', 'אוף וויט': '#c2b59b', 'אווף ויט': '#c2b59b',
-
-
-
-
-
     'מוקה': '#967969', 'חום': '#8B4513',
-
-
-
-
-
     'אוף וויט כאמל': '#c2b59b', 'אווף ויט-כאמל': '#c2b59b', 'שמנת כאמל': '#c2b59b',
-
-
-
-
-
     'כחול': '#0000FF', 'נייבי': '#0e2d4e', 'כחול נייבי': '#0e2d4e', 'ניבי': '#0e2d4e',
-
-
-
-
-
     'רויאל': '#1d4483', 'כחול רויאל': '#1d4483', 'תכלת': '#00aeef', 'טורקיז': '#029faa',
-
-
-
-
-
     'ים': '#40E0D0', 'פטרול': '#005f6a',
+
+
+
+
+
+
 
 
 
@@ -578,7 +1064,19 @@ EXTENDED_COLOR_MAP = {
 
 
 
+
+
+
+
+
+
     'תפוח': '#8DB600', 'זיית': '#4f4e20', 'זית': '#4f4e20', 'ירוק זית': '#4f4e20', 'מנטה': '#98FF98',
+
+
+
+
+
+
 
 
 
@@ -590,7 +1088,19 @@ EXTENDED_COLOR_MAP = {
 
 
 
+
+
+
+
+
+
     'ורוד פוקסיה': '#ec008c', 'סגול': '#311d72', 'סגול כהה': '#4B0082', 'חציל': '#4B0082',
+
+
+
+
+
+
 
 
 
@@ -602,7 +1112,25 @@ EXTENDED_COLOR_MAP = {
 
 
 
+
+
+
+
+
+
 }
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -626,7 +1154,25 @@ EXTENDED_COLOR_MAP = {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 def get_contrasting_print_color(bg_hex):
+
+
+
+
+
+
 
 
 
@@ -638,7 +1184,19 @@ def get_contrasting_print_color(bg_hex):
 
 
 
+
+
+
+
+
+
     h = bg_hex.lstrip('#')
+
+
+
+
+
+
 
 
 
@@ -650,7 +1208,19 @@ def get_contrasting_print_color(bg_hex):
 
 
 
+
+
+
+
+
+
         r, g, b = tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
+
+
+
+
+
+
 
 
 
@@ -662,13 +1232,31 @@ def get_contrasting_print_color(bg_hex):
 
 
 
+
+
+
+
+
+
         return '#FFFFFF' if luminance < 128 else '#000000'
 
 
 
 
 
+
+
+
+
+
+
     except:
+
+
+
+
+
+
 
 
 
@@ -686,7 +1274,25 @@ def get_contrasting_print_color(bg_hex):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 def get_hex_smart(name, return_none_on_fail=False):
+
+
+
+
+
+
 
 
 
@@ -698,7 +1304,19 @@ def get_hex_smart(name, return_none_on_fail=False):
 
 
 
+
+
+
+
+
+
     name_clean = name.strip()
+
+
+
+
+
+
 
 
 
@@ -710,7 +1328,19 @@ def get_hex_smart(name, return_none_on_fail=False):
 
 
 
+
+
+
+
+
+
         return EXTENDED_COLOR_MAP[name_clean]
+
+
+
+
+
+
 
 
 
@@ -722,7 +1352,19 @@ def get_hex_smart(name, return_none_on_fail=False):
 
 
 
+
+
+
+
+
+
     if matches:
+
+
+
+
+
+
 
 
 
@@ -734,7 +1376,19 @@ def get_hex_smart(name, return_none_on_fail=False):
 
 
 
+
+
+
+
+
+
         return EXTENDED_COLOR_MAP[matches[0]]
+
+
+
+
+
+
 
 
 
@@ -752,7 +1406,25 @@ def get_hex_smart(name, return_none_on_fail=False):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 def resolve_print_color(req_color_name, shirt_hex):
+
+
+
+
+
+
 
 
 
@@ -764,7 +1436,19 @@ def resolve_print_color(req_color_name, shirt_hex):
 
 
 
+
+
+
+
+
+
     
+
+
+
+
+
+
 
 
 
@@ -776,7 +1460,19 @@ def resolve_print_color(req_color_name, shirt_hex):
 
 
 
+
+
+
+
+
+
     found_val = get_hex_smart(txt, return_none_on_fail=True)
+
+
+
+
+
+
 
 
 
@@ -788,13 +1484,31 @@ def resolve_print_color(req_color_name, shirt_hex):
 
 
 
+
+
+
+
+
+
         return None # לא צובעים
 
 
 
 
 
+
+
+
+
+
+
     if found_val:
+
+
+
+
+
+
 
 
 
@@ -812,13 +1526,37 @@ def resolve_print_color(req_color_name, shirt_hex):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
     # 2. בדיקה אם ריק -> שחור/לבן
 
 
 
 
 
+
+
+
+
+
+
     if not txt:
+
+
+
+
+
+
 
 
 
@@ -836,7 +1574,25 @@ def resolve_print_color(req_color_name, shirt_hex):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
     # 3. בדיקה מפורשת לשחור/לבן או ג'יבריש
+
+
+
+
+
+
 
 
 
@@ -854,13 +1610,37 @@ def resolve_print_color(req_color_name, shirt_hex):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 def get_hex(name):
 
 
 
 
 
+
+
+
+
+
+
     val = get_hex_smart(name)
+
+
+
+
+
+
 
 
 
@@ -878,7 +1658,25 @@ def get_hex(name):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 def get_print_colors(name):
+
+
+
+
+
+
 
 
 
@@ -890,7 +1688,19 @@ def get_print_colors(name):
 
 
 
+
+
+
+
+
+
     # היא לא בשימוש בלוגיקה החדשה, אבל חייבת להיות קיימת
+
+
+
+
+
+
 
 
 
@@ -908,7 +1718,25 @@ def get_print_colors(name):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 def get_unique_filename(path):
+
+
+
+
+
+
 
 
 
@@ -920,13 +1748,31 @@ def get_unique_filename(path):
 
 
 
+
+
+
+
+
+
         return path
 
 
 
 
 
+
+
+
+
+
+
         
+
+
+
+
+
+
 
 
 
@@ -938,7 +1784,19 @@ def get_unique_filename(path):
 
 
 
+
+
+
+
+
+
     counter = 1
+
+
+
+
+
+
 
 
 
@@ -950,7 +1808,19 @@ def get_unique_filename(path):
 
 
 
+
+
+
+
+
+
         new_path = f"{base} ({counter}){ext}"
+
+
+
+
+
+
 
 
 
@@ -962,7 +1832,19 @@ def get_unique_filename(path):
 
 
 
+
+
+
+
+
+
             return new_path
+
+
+
+
+
+
 
 
 
@@ -970,76 +1852,153 @@ def get_unique_filename(path):
 
         counter += 1
 
+
+
 # פונקציה להורדת תמונה (תומכת בקישור, בייס64, וגם בקובץ מקומי!)
+
 def download_image(url_or_base64, filename_prefix):
+
     try:
+
         # 1. אם זה קובץ Base64 (העלאה מהדפדפן)
+
         if url_or_base64.startswith('data:'):
+
             print(f"Processing uploaded file (Base64) for: {filename_prefix}")
+
             header, encoded = url_or_base64.split(',', 1)
+
             file_ext = '.png'
+
             if 'image/svg+xml' in header: file_ext = '.svg'
+
             elif 'image/jpeg' in header or 'image/jpg' in header: file_ext = '.jpg'
+
             elif 'application/pdf' in header: file_ext = '.pdf'
+
             
+
             final_filename = f"{filename_prefix}{file_ext}"
+
             path = os.path.join(TEMP_DOWNLOAD_DIR, final_filename)
+
             
+
             with open(path, 'wb') as f:
+
                 f.write(base64.b64decode(encoded))
+
             return path
 
+
+
         # 2. === התיקון: זיהוי קובץ מקומי במחשב ===
+
         # בדיקה אם הנתיב קיים במחשב או מתחיל באות כונן (כמו C:)
+
         elif os.path.exists(url_or_base64) or (len(url_or_base64) > 1 and url_or_base64[1] == ':'):
+
             print(f"Local file detected: {url_or_base64}")
+
             
+
             # אם הקובץ לא קיים בפועל, זו בעיה
+
             if not os.path.exists(url_or_base64):
+
                 print(f"Error: Local file not found at {url_or_base64}")
+
                 return None
+
+
 
             _, ext = os.path.splitext(url_or_base64)
+
             if not ext: ext = ".png"
+
             
+
             final_filename = f"{filename_prefix}{ext}"
+
             dst_path = os.path.join(TEMP_DOWNLOAD_DIR, final_filename)
+
             
+
             # מעתיקים רק אם זה לא אותו קובץ
+
             if os.path.abspath(url_or_base64) != os.path.abspath(dst_path):
+
                 shutil.copy(url_or_base64, dst_path)
+
             
+
             return dst_path
 
+
+
         # 3. אם זה קישור אינטרנט (http/https)
+
         elif url_or_base64.startswith('http'):
+
             print(f"Downloading URL: {url_or_base64}")
+
             clean_url = url_or_base64.split('#')[0] 
+
             ext = ".png"
+
             if '.svg' in clean_url.lower(): ext = ".svg"
+
             elif '.pdf' in clean_url.lower(): ext = ".pdf"
+
             
+
             final_filename = f"{filename_prefix}{ext}"
+
             path = os.path.join(TEMP_DOWNLOAD_DIR, final_filename)
 
+
+
             response = requests.get(clean_url, stream=True)
+
             if response.status_code == 200:
+
                 with open(path, 'wb') as f:
+
                     shutil.copyfileobj(response.raw, f)
+
                 return path
+
             else:
+
                 print(f"Failed to download. Status: {response.status_code}")
+
                 return None
+
         
+
         else:
+
             print(f"Unknown file source: {url_or_base64}")
+
             return None
 
+
+
     except Exception as e:
+
         print(f"Error saving image: {e}")
+
         return None
 
+
+
 # 📢 פונקציה מעודכנת: מטפלת במתג 'ללא וקטור' 
+
+
+
+
+
+
 
 
 
@@ -1051,7 +2010,19 @@ def vec_single(d: Dict[str, Any], f: str, id: str, sec: str) -> Optional[str]:
 
 
 
+
+
+
+
+
+
     if not d.get('exists'): return None
+
+
+
+
+
+
 
 
 
@@ -1063,7 +2034,19 @@ def vec_single(d: Dict[str, Any], f: str, id: str, sec: str) -> Optional[str]:
 
 
 
+
+
+
+
+
+
     # 📢 קליטת המתג החדש
+
+
+
+
+
+
 
 
 
@@ -1081,7 +2064,25 @@ def vec_single(d: Dict[str, Any], f: str, id: str, sec: str) -> Optional[str]:
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
     if not d.get('file') or not os.path.exists(d['file']): 
+
+
+
+
+
+
 
 
 
@@ -1093,7 +2094,19 @@ def vec_single(d: Dict[str, Any], f: str, id: str, sec: str) -> Optional[str]:
 
 
 
+
+
+
+
+
+
         return None
+
+
+
+
+
+
 
 
 
@@ -1105,7 +2118,19 @@ def vec_single(d: Dict[str, Any], f: str, id: str, sec: str) -> Optional[str]:
 
 
 
+
+
+
+
+
+
     original_src_path = d['file']
+
+
+
+
+
+
 
 
 
@@ -1117,7 +2142,19 @@ def vec_single(d: Dict[str, Any], f: str, id: str, sec: str) -> Optional[str]:
 
 
 
+
+
+
+
+
+
     original_dst = os.path.join(f, f"{d['prefix']}_{os.path.basename(original_src_path)}")
+
+
+
+
+
+
 
 
 
@@ -1135,7 +2172,25 @@ def vec_single(d: Dict[str, Any], f: str, id: str, sec: str) -> Optional[str]:
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
     # --- לוגיקת וקטוריזציה מותנית ---
+
+
+
+
+
+
 
 
 
@@ -1147,7 +2202,19 @@ def vec_single(d: Dict[str, Any], f: str, id: str, sec: str) -> Optional[str]:
 
 
 
+
+
+
+
+
+
         print(f"V Skipping vectorization for {d['prefix']}. Using original file (Raster).")
+
+
+
+
+
+
 
 
 
@@ -1159,7 +2226,19 @@ def vec_single(d: Dict[str, Any], f: str, id: str, sec: str) -> Optional[str]:
 
 
 
+
+
+
+
+
+
         shutil.copy(original_src_path, dst)
+
+
+
+
+
+
 
 
 
@@ -1171,7 +2250,19 @@ def vec_single(d: Dict[str, Any], f: str, id: str, sec: str) -> Optional[str]:
 
 
 
+
+
+
+
+
+
     else:
+
+
+
+
+
+
 
 
 
@@ -1183,7 +2274,19 @@ def vec_single(d: Dict[str, Any], f: str, id: str, sec: str) -> Optional[str]:
 
 
 
+
+
+
+
+
+
         print(f"V Starting vectorization for {d['prefix']}...")
+
+
+
+
+
+
 
 
 
@@ -1195,13 +2298,31 @@ def vec_single(d: Dict[str, Any], f: str, id: str, sec: str) -> Optional[str]:
 
 
 
+
+
+
+
+
+
         # ה-convert_to_svg אמור להחזיר את הנתיב לקובץ ה-SVG שנוצר
 
 
 
 
 
+
+
+
+
+
+
         return convert_to_svg(dst, id, sec) 
+
+
+
+
+
+
 
 
 
@@ -1219,7 +2340,25 @@ def vec_single(d: Dict[str, Any], f: str, id: str, sec: str) -> Optional[str]:
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 def clean_temp_folder():
+
+
+
+
+
+
 
 
 
@@ -1231,7 +2370,19 @@ def clean_temp_folder():
 
 
 
+
+
+
+
+
+
     try:
+
+
+
+
+
+
 
 
 
@@ -1243,7 +2394,19 @@ def clean_temp_folder():
 
 
 
+
+
+
+
+
+
             # מחיקת התיקייה וכל תוכנה
+
+
+
+
+
+
 
 
 
@@ -1255,7 +2418,19 @@ def clean_temp_folder():
 
 
 
+
+
+
+
+
+
             # יצירה מחדש של התיקייה ריקה לפעם הבאה
+
+
+
+
+
+
 
 
 
@@ -1267,7 +2442,19 @@ def clean_temp_folder():
 
 
 
+
+
+
+
+
+
             print("V Temp folder cleaned.")
+
+
+
+
+
+
 
 
 
@@ -1279,7 +2466,19 @@ def clean_temp_folder():
 
 
 
+
+
+
+
+
+
         print(f"Warning: Could not clean temp folder: {e}")
+
+
+
+
+
+
 
 
 
@@ -1287,75 +2486,149 @@ def clean_temp_folder():
 
 # בראש הקובץ - ייבוא מתוקן שכולל את run_jsx
 
+
+
 def process_order(order: Dict[str, Any]):
+
+
 
     pythoncom.CoInitialize() 
 
+
+
     doc = None
+
+
 
     app = None
 
+
+
     col = "#000000" # הגדרת ברירת מחדל למניעת שגיאות IDE
+
+
 
     
 
+
+
     try:
+
+
 
         oid = str(order['order_id'])
 
+
+
         short_name = oid[-4:]
+
+
 
         prod = order.get('product_type', 'Shirt')
 
+
+
         print(f"\n=== Processing {oid} -> Folder: {short_name} ===")
 
+
+
         
+
+
 
         folder = os.path.join(ORDERS_ROOT_DIR, short_name)
 
+
+
         if not os.path.exists(folder): os.makedirs(folder)
+
+
 
         
 
+
+
         t_path = TEMPLATES.get(prod)
+
+
 
         if not t_path or not os.path.exists(t_path): 
 
+
+
             print(f"X Template not found: {t_path}")
+
+
 
             return
 
 
 
+
+
+
+
         sides = ['front', 'back', 'right_sleeve', 'left_sleeve']
+
+
 
         svgs = {}
 
+
+
         
+
+
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
 
+
+
             fs = {ex.submit(vec_single, order.get(s, {}), folder, API_ID, API_SECRET): s for s in sides}
 
+
+
             for f in concurrent.futures.as_completed(fs):
+
+
 
                 svgs[fs[f]] = f.result()
 
 
 
+
+
+
+
         # --- טיפול בצבעים ---
+
+
 
         col_raw = order.get('product_color_hebrew', "")
 
+
+
         color_parts = [p.strip() for p in col_raw.split("-")] if col_raw and "-" in col_raw else [col_raw]
+
+
 
         h1 = get_hex_smart(color_parts[0])
 
+
+
         h2 = get_hex_smart(color_parts[1]) if len(color_parts) >= 2 else h1
+
+
 
         is_split = len(color_parts) >= 2
 
+
+
         col = h1 
+
+
+
+
 
 
 
@@ -1363,123 +2636,249 @@ def process_order(order: Dict[str, Any]):
 
 
 
+
+
+
+
         # צבעים נוספים לריבועים
+
+
 
         extra_heb_names = order.get('extra_colors_hebrew', [])
 
+
+
         extra_data_list = [] 
+
+
 
         if extra_heb_names:
 
+
+
             for name in extra_heb_names:
+
+
 
                 parts = [p.strip() for p in name.split("-")] if "-" in name else [name]
 
+
+
                 color_pair = [get_hex_smart(p) for p in parts[:2] if get_hex_smart(p) and get_hex_smart(p) != 'ORIGINAL']
+
+
 
                 if color_pair: extra_data_list.append(color_pair)
 
+
+
         
+
+
 
         apply_extra_colors(app, extra_data_list)
 
 
 
+
+
+
+
         # --- הרצת הסימולציה לכל צד ---
+
+
 
         for s in sides:
 
+
+
             d = order.get(s, {})
+
+
 
             if d.get('exists') and svgs.get(s):
 
+
+
                 is_raster = d.get('no_vectorization', False)
+
+
 
                 final_color = resolve_print_color(d.get('req_color_hebrew'), col)
 
+
+
                 cs = final_color
+
+
 
                 cp = final_color if final_color != '#FFFFFF' else '#000000'
 
+
+
                 w = place_and_simulate_print(doc, app, svgs[s], d['prefix'], d['category'], cp, cs, is_raster=is_raster)
 
+
+
                 if w > 0: 
+
+
 
                     update_size_label(doc, app, d['label'], w, d.get('heb', ''))
 
 
 
+
+
+
+
         # === לוגיקת ניקוי (תיקון למחיקת עמודים וכיתובים חסרים) ===
+
+
 
         print("Cleaning up unused artboards and labels...")
 
+
+
         rs_exists = order.get('right_sleeve', {}).get('exists', False)
+
+
 
         ls_exists = order.get('left_sleeve', {}).get('exists', False)
 
 
 
+
+
+
+
         # בדיקת שרוולים
+
+
 
         if not rs_exists and not ls_exists:
 
+
+
             delete_side_assets(doc, app, "Print_Sleeves", "size_Right_Sleeve")
 
+
+
             run_jsx(app, "try{app.activeDocument.textFrames.getByName('size_Left_Sleeve').remove();}catch(e){}")
+
+
 
         elif not rs_exists:
 
+
+
             run_jsx(app, "try{app.activeDocument.textFrames.getByName('size_Right_Sleeve').remove();}catch(e){}")
+
+
 
         elif not ls_exists:
 
+
+
             run_jsx(app, "try{app.activeDocument.textFrames.getByName('size_Left_Sleeve').remove();}catch(e){}")
+
+
+
+
 
 
 
         # בדיקת קדימה / אחורה
 
+
+
         if not order.get('front', {}).get('exists'):
+
+
 
             delete_side_assets(doc, app, "Print_Front", "size_Front")
 
+
+
         if not order.get('back', {}).get('exists'):
+
+
 
             delete_side_assets(doc, app, "Print_Back", "size_Back")
 
 
 
+
+
+
+
         clean_layout(app)
+
+
 
         base_pdf_path = os.path.join(folder, f"{short_name}.pdf")
 
+
+
         final_pdf_path = get_unique_filename(base_pdf_path)
+
+
 
         save_pdf(doc, final_pdf_path)
 
+
+
         print(f"V Finished! Saved to: {final_pdf_path}")
+
+
 
             
 
+
+
     except Exception as general_e:
+
+
 
         print(f"!!! FATAL ERROR: {general_e}")
 
+
+
         if app: 
+
+
 
             try: app.Quit()
 
+
+
             except: pass
+
+
 
     finally:
 
+
+
         clean_temp_folder()
+
+
 
         pythoncom.CoUninitialize()
 
 
 
+
+
+
+
 # --- נקודת הכניסה ---
+
+
+
+
+
+
 
 
 
@@ -1491,7 +2890,19 @@ if __name__ == "__main__":
 
 
 
+
+
+
+
+
+
     if len(sys.argv) > 1:
+
+
+
+
+
+
 
 
 
@@ -1503,7 +2914,19 @@ if __name__ == "__main__":
 
 
 
+
+
+
+
+
+
             # 1. קריאת ה-JSON
+
+
+
+
+
+
 
 
 
@@ -1515,7 +2938,19 @@ if __name__ == "__main__":
 
 
 
+
+
+
+
+
+
             order_data = json.loads(json_str)
+
+
+
+
+
+
 
 
 
@@ -1527,7 +2962,19 @@ if __name__ == "__main__":
 
 
 
+
+
+
+
+
+
             # === התיקון: חילוץ 4 ספרות אחרונות ===
+
+
+
+
+
+
 
 
 
@@ -1539,13 +2986,31 @@ if __name__ == "__main__":
 
 
 
+
+
+
+
+
+
             short_id = full_id[-4:] 
 
 
 
 
 
+
+
+
+
+
+
             print(f"Processing Order: {full_id} (Short: {short_id})")
+
+
+
+
+
+
 
 
 
@@ -1563,7 +3028,25 @@ if __name__ == "__main__":
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
             # 2. הורדת קבצים
+
+
+
+
+
+
 
 
 
@@ -1575,7 +3058,19 @@ if __name__ == "__main__":
 
 
 
+
+
+
+
+
+
                 loc_data = order_data.get(loc, {})
+
+
+
+
+
+
 
 
 
@@ -1587,7 +3082,19 @@ if __name__ == "__main__":
 
 
 
+
+
+
+
+
+
                     url = loc_data.get('file_url')
+
+
+
+
+
+
 
 
 
@@ -1599,7 +3106,19 @@ if __name__ == "__main__":
 
 
 
+
+
+
+
+
+
                         # זיהוי סיומת
+
+
+
+
+
+
 
 
 
@@ -1611,7 +3130,19 @@ if __name__ == "__main__":
 
 
 
+
+
+
+
+
+
                         lower_url = url.lower()
+
+
+
+
+
+
 
 
 
@@ -1623,7 +3154,19 @@ if __name__ == "__main__":
 
 
 
+
+
+
+
+
+
                         elif '.jpg' in lower_url or '.jpeg' in lower_url: ext = ".jpg"
+
+
+
+
+
+
 
 
 
@@ -1635,7 +3178,19 @@ if __name__ == "__main__":
 
 
 
+
+
+
+
+
+
                         
+
+
+
+
+
+
 
 
 
@@ -1647,7 +3202,19 @@ if __name__ == "__main__":
 
 
 
+
+
+
+
+
+
                         filename_prefix = f"{short_id}_{loc}"
+
+
+
+
+
+
 
 
 
@@ -1659,7 +3226,19 @@ if __name__ == "__main__":
 
 
 
+
+
+
+
+
+
                         
+
+
+
+
+
+
 
 
 
@@ -1671,7 +3250,19 @@ if __name__ == "__main__":
 
 
 
+
+
+
+
+
+
                         local_path = download_image(url, filename_prefix)
+
+
+
+
+
+
 
 
 
@@ -1683,7 +3274,19 @@ if __name__ == "__main__":
 
 
 
+
+
+
+
+
+
                         if local_path:
+
+
+
+
+
+
 
 
 
@@ -1695,13 +3298,31 @@ if __name__ == "__main__":
 
 
 
+
+
+
+
+
+
                         else:
 
 
 
 
 
+
+
+
+
+
+
                             print(f"Error: Could not download file for {loc}")
+
+
+
+
+
+
 
 
 
@@ -1719,7 +3340,25 @@ if __name__ == "__main__":
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
             # 3. הפעלת העיבוד באילוסטרייטור
+
+
+
+
+
+
 
 
 
@@ -1737,7 +3376,25 @@ if __name__ == "__main__":
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
         except Exception as e:
+
+
+
+
+
+
 
 
 
@@ -1749,7 +3406,19 @@ if __name__ == "__main__":
 
 
 
+
+
+
+
+
+
             import traceback
+
+
+
+
+
+
 
 
 
@@ -1761,7 +3430,19 @@ if __name__ == "__main__":
 
 
 
+
+
+
+
+
+
     else:
+
+
+
+
+
+
 
 
 
