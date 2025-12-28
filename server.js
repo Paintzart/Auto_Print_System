@@ -9,7 +9,7 @@ const { S3Client, GetObjectCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 
 // ==========================================================
-//              פרטי R2 (כמו שהיו לך)
+//              פרטי R2
 // ==========================================================
 const R2_ACCOUNT_ID = "944539d199bcd56d08fd20e2920753c9";
 const R2_ACCESS_KEY_ID = "869cd104efd961706ce96b5d051388b3";
@@ -27,7 +27,6 @@ const s3Client = new S3Client({
 const app = express();
 const PORT = 3000;
 
-// הגדלת מגבלת הגודל כדי שהשרת יקבל תמונות גדולות מהאתר
 app.use(cors());
 app.use(bodyParser.json({ limit: '200mb' }));
 app.use(bodyParser.urlencoded({ limit: '200mb', extended: true }));
@@ -35,7 +34,11 @@ app.use(bodyParser.urlencoded({ limit: '200mb', extended: true }));
 const TEMP_DIR = path.join(__dirname, 'temp_downloads');
 if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR);
 
-// --- פונקציות עזר קיימות (R2) ---
+// === הגדרת הפייתון (כדי למנוע שגיאות של ספריות חסרות) ===
+const venvPythonPath = path.join(__dirname, 'venv', 'Scripts', 'python.exe');
+const PYTHON_EXE = fs.existsSync(venvPythonPath) ? venvPythonPath : 'python';
+
+// --- פונקציות עזר (R2) ---
 async function getR2SignedUrl(originalUrl) {
     try {
         const urlObj = new URL(originalUrl);
@@ -49,7 +52,7 @@ async function getR2SignedUrl(originalUrl) {
     }
 }
 
-// === כפתור ורוד (ללא שינוי) ===
+// === כפתור ורוד ===
 app.post('/prepare-print', async (req, res) => {
     let { orderId, fileUrl, thickness } = req.body;
     console.log(`\n🌸 בקשה להכנת דפוס: הזמנה ${orderId}`);
@@ -73,10 +76,8 @@ app.post('/prepare-print', async (req, res) => {
         });
 
         const pythonScriptPath = path.join(__dirname, 'prepare_print.py');
-        const venvPythonPath = path.join(__dirname, 'venv', 'Scripts', 'python.exe');
-        const pythonExe = fs.existsSync(venvPythonPath) ? venvPythonPath : 'python';
-
-        const pythonProcess = spawn(pythonExe, [pythonScriptPath, localFilePath, orderId, thickness], { shell: true });
+        const pythonProcess = spawn(PYTHON_EXE, [pythonScriptPath, localFilePath, orderId, thickness], { shell: true });
+        
         pythonProcess.stdout.on('data', (data) => console.log(`[Python]: ${data}`));
         pythonProcess.stderr.on('data', (data) => console.error(`[Error]: ${data}`));
         pythonProcess.on('close', (code) => {
@@ -90,48 +91,37 @@ app.post('/prepare-print', async (req, res) => {
     }
 });
 
-// ==========================================================
-//       פונקציית עזר חדשה: שמירת Base64 לקובץ זמני
-// ==========================================================
 function saveBase64Image(base64Str, prefix) {
     if (!base64Str || !base64Str.startsWith('data:')) return base64Str;
-    
     try {
-        // זיהוי סוג קובץ
         const matches = base64Str.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
         if (!matches || matches.length !== 3) return base64Str;
-        
         const type = matches[1];
         const data = matches[2];
         const buffer = Buffer.from(data, 'base64');
-        
         let ext = '.png';
         if (type.includes('jpeg') || type.includes('jpg')) ext = '.jpg';
         if (type.includes('pdf')) ext = '.pdf';
         if (type.includes('svg')) ext = '.svg';
-        
         const fileName = `${prefix}_${Date.now()}${ext}`;
         const filePath = path.join(TEMP_DIR, fileName);
-        
         fs.writeFileSync(filePath, buffer);
-        console.log(`   > שמרתי קובץ זמני במקום Base64: ${fileName}`);
-        return filePath; // מחזירים את הנתיב לקובץ במקום את כל הטקסט הארוך
+        console.log(`   > שמרתי קובץ זמני: ${fileName}`);
+        return filePath; 
     } catch (e) {
         console.error("Error saving base64:", e);
         return base64Str;
     }
 }
 
-// ==========================================================
-//        פונקציית הרצת סימולציה (מעודכנת למניעת קריסות)
-// ==========================================================
-function runSingleSimulation(singleProductData) {
+// === פונקציית ההרצה (הישנה והטובה) ===
+function runSingleSimulation(payloadForPython) {
     return new Promise((resolve, reject) => {
         const pythonScriptPath = path.join(__dirname, 'main.py');
-        console.log(`   >> מריץ פייתון עבור מוצר: ${singleProductData.product_type}`);
+        console.log(`   >> מריץ פייתון...`);
         
-        // כאן הקסם: הפייתון מקבל JSON "רזה" עם נתיבים לקבצים, בלי הטקסט הענק
-        const pythonProcess = spawn('python', [pythonScriptPath, JSON.stringify(singleProductData)]);
+        // שימוש בפייתון הנכון (VENV)
+        const pythonProcess = spawn(PYTHON_EXE, [pythonScriptPath, JSON.stringify(payloadForPython)]);
 
         pythonProcess.stdout.on('data', (data) => console.log(`[Sim Python]: ${data}`));
         pythonProcess.stderr.on('data', (data) => console.error(`[Sim Error]: ${data}`));
@@ -148,9 +138,8 @@ function runSingleSimulation(singleProductData) {
     });
 }
 
-// ==========================================================
-//        כפתור סגול: הדמיה (עם טיפול בתמונות כבדות)
-// ==========================================================
+// === כפתור סגול: הדמיה ===
+// === כפתור סגול: הדמיה (התיקון לאיחוד הקבצים) ===
 app.post('/run-simulation', async (req, res) => {
     const { order_id, products } = req.body;
     console.log(`\n🟣 בקשה להדמיה: הזמנה ${order_id} (${products ? products.length : 0} מוצרים)`);
@@ -160,27 +149,21 @@ app.post('/run-simulation', async (req, res) => {
     }
 
     try {
+        // 1. יצירת רשימה לאיסוף כל המוצרים המעובדים
+        const processedProducts = [];
+
         for (let i = 0; i < products.length; i++) {
             const prod = products[i];
             console.log(`\n--- מעבד מוצר ${i + 1} ---`);
 
-            // 1. שמירת תמונות כבדות לקבצים זמניים לפני השליחה לפייתון
-            // זה מונע את השגיאה של "שורת פקודה ארוכה מדי"
-            if (prod.locations.front && prod.locations.front.file_url) 
-                prod.locations.front.file_url = saveBase64Image(prod.locations.front.file_url, `front_${i}`);
-            
-            if (prod.locations.back && prod.locations.back.file_url) 
-                prod.locations.back.file_url = saveBase64Image(prod.locations.back.file_url, `back_${i}`);
-            
-            if (prod.locations.right_sleeve && prod.locations.right_sleeve.file_url) 
-                prod.locations.right_sleeve.file_url = saveBase64Image(prod.locations.right_sleeve.file_url, `right_${i}`);
-            
-            if (prod.locations.left_sleeve && prod.locations.left_sleeve.file_url) 
-                prod.locations.left_sleeve.file_url = saveBase64Image(prod.locations.left_sleeve.file_url, `left_${i}`);
+            // שמירת תמונות כבדות (ללא שינוי)
+            if (prod.locations.front?.file_url) prod.locations.front.file_url = saveBase64Image(prod.locations.front.file_url, `front_${i}`);
+            if (prod.locations.back?.file_url) prod.locations.back.file_url = saveBase64Image(prod.locations.back.file_url, `back_${i}`);
+            if (prod.locations.right_sleeve?.file_url) prod.locations.right_sleeve.file_url = saveBase64Image(prod.locations.right_sleeve.file_url, `right_${i}`);
+            if (prod.locations.left_sleeve?.file_url) prod.locations.left_sleeve.file_url = saveBase64Image(prod.locations.left_sleeve.file_url, `left_${i}`);
 
-            // 2. בניית האובייקט לפייתון (עכשיו הוא קליל ומהיר)
-            const singleOrderData = {
-                order_id: order_id,
+            // הוספת המוצר לרשימה (במקום לשלוח לפייתון מיד!)
+            processedProducts.push({
                 item_index: prod.item_index, 
                 product_type: prod.product_type,
                 product_color_hebrew: prod.product_color_hebrew,
@@ -189,13 +172,20 @@ app.post('/run-simulation', async (req, res) => {
                 back: prod.locations.back || { exists: false },
                 right_sleeve: prod.locations.right_sleeve || { exists: false },
                 left_sleeve: prod.locations.left_sleeve || { exists: false }
-            };
-
-            await runSingleSimulation(singleOrderData);
+            });
         }
 
+        // 2. הכנת המידע המלא לפייתון (כל המוצרים יחד)
+        const fullBatchData = {
+            order_id: order_id,
+            products: processedProducts // כאן נכנסים כל המוצרים
+        };
+
+        // 3. שליחה לפייתון פעם אחת בלבד!
+        await runSingleSimulation(fullBatchData);
+
         console.log("\n✅ הכל הסתיים בהצלחה!");
-        res.json({ success: true, message: "ההדמיות הסתיימו" });
+        res.json({ success: true, message: "ההדמיות הסתיימו ואוחדו בהצלחה" });
 
     } catch (error) {
         console.error("❌ תקלה:", error);
