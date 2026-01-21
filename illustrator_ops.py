@@ -5992,6 +5992,40 @@ function smartPos(itemName, prefix, category, resizeArtboard, isPrint, artboardN
 
 
 
+        // בדיקה נוספת: אם A4 ריבוע, אחד מהמימדים קטן מ-19.9 ס"מ והשני הוא 24 ס"מ, להגדיל ל-19.9 ס"מ (רק בקבצי הדפסה!)
+        // 19.9 ס"מ = 19.9 * 28.34645 = 564.194 נקודות
+        // 24 ס"מ = 24 * 28.34645 = 680.3148 נקודות
+        if (isPrint && category === "A4" && suffix === "A4_Square") {
+            var currentW = item.width;
+            var currentH = item.height;
+            var minSizePoints = 19.9 * 28.34645; // המרה מס"מ לנקודות
+            var targetSizePoints = 24.0 * 28.34645; // 24 ס"מ בנקודות
+            var tolerance = 2.0; // טולרנס לבדיקת "בדיוק" 24 ס"מ (±2 נקודות)
+            
+            // בודקים אם אחד קטן מ-19.9 והשני הוא 24 ס"מ (בטולרנס)
+            var wIsSmall = currentW < minSizePoints;
+            var hIsSmall = currentH < minSizePoints;
+            var wIs24 = Math.abs(currentW - targetSizePoints) <= tolerance;
+            var hIs24 = Math.abs(currentH - targetSizePoints) <= tolerance;
+            
+            if ((wIsSmall && hIs24) || (hIsSmall && wIs24)) {
+                // מחשבים את ה-scale הנוסף הנדרש מהגודל הנוכחי
+                // כדי שהמימד הקטן יהיה לפחות 19.9 ס"מ (564.194 נקודות)
+                var scaleW_additional = (minSizePoints / currentW) * 100.0;
+                var scaleH_additional = (minSizePoints / currentH) * 100.0;
+                // לוקחים את ה-scale הגדול יותר כדי שהמימד הקטן יהיה לפחות 19.9 ס"מ
+                var additionalScale = Math.max(scaleW_additional, scaleH_additional);
+                
+                // מגדילים את האלמנט ב-scale נוסף (יחסי לגודל הנוכחי)
+                item.resize(additionalScale, additionalScale);
+                
+                // מעדכנים את המיקום לאחר השינוי
+                item.position = [cx - item.width/2.0, cy + item.height/2.0];
+            }
+        }
+
+
+
         // 2. שינוי גודל הדף (רק אם זה לא A4 מרובע!)
 
         // התיקון כאן: הוספת התנאי suffix !== "A4_Square"
@@ -8290,7 +8324,7 @@ def update_size_label(doc, app, name, w, txt):
 
 
 
-    final_text = f"{width_cm} ס\"מ הדפס {txt}"
+    final_text = f"{width_cm} ס\"מ רוחב הדפס {txt}"
 
 
 
