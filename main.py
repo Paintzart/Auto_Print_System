@@ -275,215 +275,171 @@ def process_single_product_to_temp(order, idx, folder):
 # -----------------------------------------------------------
 # פונקציית האיחוד: ה-Super Script (חישוב גובה ורוחב דינמי חכם)
 # -----------------------------------------------------------
-def create_and_run_merge_script(files_list, output_pdf):
+def create_and_run_merge_script(files_list, output_pdf, order_data=None):
     pythoncom.CoInitialize()
-    
     if not files_list: return
     
-    js_files = [f.replace("\\", "/") for f in files_list]
-    js_output = output_pdf.replace("\\", "/")
+# חילוץ רשימת המוצרים שהוזמנו כדי למנוע כפילויות בסרגל הצד
+    ordered_products = []
+    if order_data and 'products' in order_data:
+        # אוסף את כל ה-product_type הייחודיים מההזמנה
+        ordered_products = list(set([str(p.get('product_type')) for p in order_data['products']]))
+
+    # --- הדפסה ללוג לצורך בקרה (מה שביקשת) ---
+    print("\n" + "="*40)
+    print(f"📊 SIDEBAR DATA CONTROL:")
+    print(f"🛒 Products in current order: {ordered_products}")
     
-    # === ה-JSX של הגריד החכם (4 בשורה + גובה דינמי) ===
+    # בדיקה אילו מהמוצרים האלו קיימים ברשימת האופציות של הסרגל
+    upsell_list = ["Apron", "Drawstring Bag", "Wide Brimmed Hat", "Neck Warmer", "Canvas Bag", "Polo", "Fleece1", "Beanie", "Boxers", "Short", "Hoodie", "Hat"]
+    filtered_out = [p for p in ordered_products if p in upsell_list]
+    
+    if filtered_out:
+        print(f"🚫 Products to be FILTERED OUT from sidebar: {filtered_out}")
+    else:
+        print(f"✅ No products from the order match the sidebar options.")
+    print("="*40 + "\n")
+    # ------------------------------------------
+
+    # קריאת נתוני simulation_ad מה-order_data
+    sim_ad = order_data.get('simulation_ad', {}) or {} if order_data else {}
+    show_sidebar = bool(sim_ad.get('enabled', False))
+    upsell_mode = sim_ad.get('mode', 'random')
+    manual_list = sim_ad.get('selected_products', [])
+    
+    # הכנת אובייקט הגדרות ל-JSX
+    job_config = {
+        "sidebar_path": config.get('sidebar_template_path', "").replace("\\", "/"),
+        "ordered_products": ordered_products,
+        "show_sidebar": show_sidebar,
+        "upsell_mode": upsell_mode,
+        "manual_products": manual_list,
+    }
+    
+    # כתיבת הקונפיג לקובץ JSON זמני
+    with open(os.path.join(BASE_DIR, "current_job.json"), "w", encoding="utf-8") as f:
+        json.dump(job_config, f, ensure_ascii=False, indent=4)    # ------------------------------------------
+
+    js_files = [f.replace("\\", "/") for f in files_list]
+    sidebar_logic_path = os.path.join(BASE_DIR, "sidebar_logic.jsx").replace("\\", "/")
+    
     jsx_content = f"""
     #target illustrator
-    
     var files = {json.dumps(js_files)};
-    var finalPath = "{js_output}";
     
     function main() {{
         if (files.length === 0) return;
-        
         app.userInteractionLevel = UserInteractionLevel.DONTDISPLAYALERTS;
-        app.preferences.setBooleanPreference("preventPasteRemembersLayers", true); 
         
-        // 1. פתיחת המאסטר (הקובץ הראשון)
-        var masterFile = new File(files[0]);
-        var masterDoc = app.open(masterFile);
-        masterDoc.activate();
+        var maxWidth = 0; var maxHeight = 0;
+        for (var i = 0; i < files.length; i++) {{
+            var tempDoc = app.open(new File(files[i]));
+            var m = calculateLayoutMetrics(tempDoc);
+            if (m.width > maxWidth) maxWidth = m.width;
+            if (m.height > maxHeight) maxHeight = m.height;
+            tempDoc.close(SaveOptions.DONOTSAVECHANGES);
+        }}
         
+        var STEP_X = maxWidth + 150; 
+        var STEP_Y = maxHeight + 250;
+        var COLS = 4;
+
+        var masterDoc = app.open(new File(files[0]));
         organizeMasterContent(masterDoc);
         
-        // === חישוב דינמי של גודל המוצר ===
-        // מודדים את הגובה האמיתי של הקובץ כדי לדעת כמה לרדת שורה
-        var metrics = calculateLayoutMetrics(masterDoc);
-        var productWidth = metrics.width;
-        var productHeight = metrics.height;
-        
-        // הגדרות גריד
-        var GAP_X = 100; 
-        var GAP_Y = 200; 
-        var COLS = 4;    // 4 מוצרים בשורה
-        
-        var STEP_X = productWidth + GAP_X;
-        var STEP_Y = productHeight + GAP_Y;
-        
-        // 2. לולאה על שאר הקבצים ומיקום לפי הגריד
-        for (var i = 1; i < files.length; i++) {{
-            var srcPath = files[i];
-            
-            var col = i % COLS; 
-            var row = Math.floor(i / COLS);
-            
-            var offsetX = col * STEP_X;
-            var offsetY = -(row * STEP_Y); // ירידה למטה לפי הגובה המחושב
-            
-            processNextFileFast(masterDoc, srcPath, (i+1).toString(), offsetX, offsetY);
+        for (var j = 1; j < files.length; j++) {{
+            var col = j % COLS;
+            var row = Math.floor(j / COLS);
+            processNextFileFast(masterDoc, files[j], (j+1).toString(), col * STEP_X, -(row * STEP_Y));
         }}
         
-        // 3. סידור דפים ומחיקת מיותרים
+        var sideFile = new File("{sidebar_logic_path}");
+        var showSidebar = {str(show_sidebar).lower()};
+        if (showSidebar && sideFile.exists) {{ 
+            $.evalFile(sideFile); 
+        }}
         reorderArtboardsSafe(masterDoc);
-        
-        // 4. שמירה
-        saveFinalPDF(masterDoc, finalPath);
     }}
     
+    // --- שאר הפונקציות (calculateLayoutMetrics, organizeMasterContent וכו') נשארות ללא שינוי ---
     function calculateLayoutMetrics(doc) {{
-        var minX = Infinity;
-        var maxX = -Infinity;
-        var maxY = -Infinity; 
-        var minY = Infinity;  
-        
+        var minX = Infinity; var maxX = -Infinity; var maxY = -Infinity; var minY = Infinity;  
         for (var i = 0; i < doc.artboards.length; i++) {{
             var r = doc.artboards[i].artboardRect; 
-            if (r[0] < minX) minX = r[0];
-            if (r[2] > maxX) maxX = r[2];
-            if (r[1] > maxY) maxY = r[1]; 
-            if (r[3] < minY) minY = r[3]; 
+            if (r[0] < minX) minX = r[0]; if (r[2] > maxX) maxX = r[2];
+            if (r[1] > maxY) maxY = r[1]; if (r[3] < minY) minY = r[3]; 
         }}
-        
-        return {{
-            width: Math.abs(maxX - minX),
-            height: Math.abs(maxY - minY)
-        }};
+        return {{ width: Math.abs(maxX - minX), height: Math.abs(maxY - minY) }};
     }}
     
     function organizeMasterContent(doc) {{
-        app.executeMenuCommand('unlockAll');
-        app.executeMenuCommand('showAll');
-        
-        var l1 = doc.layers.add();
-        l1.name = "1";
-        
+        app.executeMenuCommand('unlockAll'); app.executeMenuCommand('showAll');
+        var l1 = doc.layers.add(); l1.name = "1";
         for (var i = doc.layers.length - 1; i >= 0; i--) {{
             var lay = doc.layers[i];
-            if (lay != l1) {{
-                lay.move(l1, ElementPlacement.PLACEATEND);
-            }}
+            if (lay != l1) lay.move(l1, ElementPlacement.PLACEATEND);
         }}
     }}
     
     function fastCopyLayer(srcLayer, destLayer, offX, offY) {{
         if (srcLayer.pageItems.length > 0) {{
-            var tempGroup = srcLayer.groupItems.add();
-            var items = srcLayer.pageItems;
-            for (var i = items.length - 1; i >= 0; i--) {{
-                if (items[i] != tempGroup) {{
-                    try {{ items[i].move(tempGroup, ElementPlacement.PLACEATEND); }} catch(e) {{}}
+            var tempGrp = srcLayer.groupItems.add();
+            for (var i = srcLayer.pageItems.length - 1; i >= 0; i--) {{
+                if (srcLayer.pageItems[i] != tempGrp) {{
+                    srcLayer.pageItems[i].move(tempGrp, ElementPlacement.PLACEATEND);
                 }}
             }}
             try {{
-                var dupGroup = tempGroup.duplicate(destLayer, ElementPlacement.PLACEATBEGINNING);
-                dupGroup.translate(offX, offY);
-                dupGroup.ungroup();
+                var dup = tempGrp.duplicate(destLayer, ElementPlacement.PLACEATBEGINNING);
+                dup.translate(offX, offY);
+                while (dup.pageItems.length > 0) {{
+                    dup.pageItems[0].move(destLayer, ElementPlacement.PLACEATBEGINNING);
+                }}
+                dup.remove();
+                while (tempGrp.pageItems.length > 0) {{
+                    tempGrp.pageItems[0].move(srcLayer, ElementPlacement.PLACEATBEGINNING);
+                }}
+                tempGrp.remove();
             }} catch(e) {{}}
         }}
-        for (var j = srcLayer.layers.length - 1; j >= 0; j--) {{
-            var srcSub = srcLayer.layers[j];
-            var destSub = destLayer.layers.add();
-            destSub.name = srcSub.name;
-            fastCopyLayer(srcSub, destSub, offX, offY);
-        }}
-    }}
-    
-    function recursiveUnlock(layersCollection) {{
-        for (var i = 0; i < layersCollection.length; i++) {{
-            var lay = layersCollection[i];
-            lay.locked = false;
-            lay.visible = true;
-            var items = lay.pageItems;
-            for (var j = 0; j < items.length; j++) {{
-                try {{ items[j].locked = false; items[j].hidden = false; }} catch(e) {{}}
-            }}
-            if (lay.layers.length > 0) {{
-                recursiveUnlock(lay.layers);
-            }}
+        for (var j = 0; j < srcLayer.layers.length; j++) {{
+            var sSub = srcLayer.layers[j];
+            var dSub = destLayer.layers.add();
+            dSub.name = sSub.name;
+            fastCopyLayer(sSub, dSub, offX, offY);
         }}
     }}
     
     function processNextFileFast(masterDoc, srcPath, layerName, offX, offY) {{
         var srcDoc = app.open(new File(srcPath));
-        srcDoc.activate();
-        
-        app.executeMenuCommand('unlockAll');
-        app.executeMenuCommand('showAll');
-        recursiveUnlock(srcDoc.layers); 
-        
         var abData = [];
-        for(var i=0; i<srcDoc.artboards.length; i++){{
-            abData.push({{rect: srcDoc.artboards[i].artboardRect, name: srcDoc.artboards[i].name}});
-        }}
-        
+        for(var i=0; i<srcDoc.artboards.length; i++) abData.push({{rect: srcDoc.artboards[i].artboardRect, name: srcDoc.artboards[i].name}});
         masterDoc.activate();
-        var mainLayer = masterDoc.layers.add();
-        mainLayer.name = layerName;
-        
-        var srcLayers = srcDoc.layers;
-        for (var k = srcLayers.length - 1; k >= 0; k--) {{
-            var sLay = srcLayers[k];
+        var mainLayer = masterDoc.layers.add(); mainLayer.name = layerName;
+        for (var k = 0; k < srcDoc.layers.length; k++) {{
+            var sLay = srcDoc.layers[k];
             var dLay = mainLayer.layers.add();
             dLay.name = sLay.name;
             fastCopyLayer(sLay, dLay, offX, offY);
         }}
-        
         srcDoc.close(SaveOptions.DONOTSAVECHANGES);
-        
         masterDoc.activate();
         for(var n=0; n<abData.length; n++){{
             var d = abData[n];
-            var newLeft = d.rect[0] + offX;
-            var newTop = d.rect[1] + offY;
-            var newRight = d.rect[2] + offX;
-            var newBottom = d.rect[3] + offY;
-            
-            var newAb = masterDoc.artboards.add([newLeft, newTop, newRight, newBottom]);
+            var newAb = masterDoc.artboards.add([d.rect[0]+offX, d.rect[1]+offY, d.rect[2]+offX, d.rect[3]+offY]);
             newAb.name = "P" + layerName + "_" + d.name;
         }}
     }}
     
     function reorderArtboardsSafe(doc) {{
         var oldAbs = [];
-        for (var i = 0; i < doc.artboards.length; i++) {{
-            oldAbs.push({{
-                rect: doc.artboards[i].artboardRect,
-                name: doc.artboards[i].name
-            }});
-        }}
-        
+        for (var i = 0; i < doc.artboards.length; i++) oldAbs.push({{rect: doc.artboards[i].artboardRect, name: doc.artboards[i].name}});
         var newOrder = [];
-        for (var i = 0; i < oldAbs.length; i++) {{
-            if (oldAbs[i].name.indexOf("Simulation") > -1) newOrder.push(oldAbs[i]);
-        }}
-        for (var i = 0; i < oldAbs.length; i++) {{
-            if (oldAbs[i].name.indexOf("Simulation") === -1) newOrder.push(oldAbs[i]);
-        }}
-        
-        for (var i = 0; i < newOrder.length; i++) {{
-            var n = doc.artboards.add(newOrder[i].rect);
-            n.name = newOrder[i].name;
-        }}
-        
-        var deleteCount = oldAbs.length;
-        for (var k = 0; k < deleteCount; k++) {{
-            doc.artboards[0].remove();
-        }}
-    }}
-    
-    function saveFinalPDF(doc, path) {{
-        var opts = new PDFSaveOptions();
-        opts.preserveEditability = true;
-        var f = new File(path);
-        doc.saveAs(f, opts);
-        doc.close(SaveOptions.DONOTSAVECHANGES);
+        for (var i = 0; i < oldAbs.length; i++) if (oldAbs[i].name.indexOf("Simulation") > -1) newOrder.push(oldAbs[i]);
+        for (var i = 0; i < oldAbs.length; i++) if (oldAbs[i].name.indexOf("Simulation") === -1) newOrder.push(oldAbs[i]);
+        for (var j = 0; j < newOrder.length; j++) doc.artboards.add(newOrder[j].rect).name = newOrder[j].name;
+        var len = oldAbs.length;
+        for (var k = 0; k < len; k++) doc.artboards[0].remove();
     }}
     
     main();
@@ -493,56 +449,84 @@ def create_and_run_merge_script(files_list, output_pdf):
     with open(script_path, "w", encoding="utf-8") as f:
         f.write(jsx_content)
         
-    print(f"Generated Merge Script: {script_path}")
-    
     try:
         app = win32com.client.Dispatch("Illustrator.Application")
         app.DoJavaScriptFile(script_path)
-        print("V Merge Script Completed.")
+        
+        if app.Documents.Count > 0:
+            doc = app.ActiveDocument
+            pdf_options = win32com.client.Dispatch("Illustrator.PDFSaveOptions")
+            pdf_options.PDFPreset = "[High Quality Print]"
+            pdf_options.PreserveEditability = True
+            final_path = output_pdf.replace("/", "\\")
+            doc.SaveAs(final_path, pdf_options)
+            doc.Close(2)
+            
     except Exception as e:
-        print(f"Error executing JSX: {e}")                  
-# --- MAIN ENTRY ---
+        print(f"Error during execution/save: {e}")
+        
+        # --- MAIN ENTRY ---
 if __name__ == "__main__":
     if len(sys.argv) > 1:
         try:
+            # טעינת הנתונים שהגיעו מהקריאה
             full_data = json.loads(sys.argv[1])
-            order_id = str(full_data.get('order_id', '0000'))
+            
+            # שלב 1: חילוץ מספר הזמנה מהנתונים האמיתיים (לא משתנה קבוע)
+            raw_order_id = str(full_data.get('order_id', '0000')).strip()
+            
+            # לקיחת 4 ספרות אחרונות בלבד
+            current_order_4 = raw_order_id[-4:]
+            
+            # הדפסה לבדיקה בטרמינל (תוכלי לראות מה הוא באמת מזהה)
+            print(f"DEBUG: Processing Order ID: {raw_order_id} | Final Name will be: {current_order_4}")
+            
             products = full_data.get('products', [])
-            short_id = order_id[-4:]
             
-            print(f"Starting Batch: {order_id} ({len(products)} items)")
+            # שלב 2: יצירת תיקיית פלט (לפי ה-4 ספרות)
+            order_folder = os.path.join(ORDERS_ROOT_DIR, current_order_4)
+            if not os.path.exists(order_folder): 
+                os.makedirs(order_folder)
             
-            order_folder = os.path.join(ORDERS_ROOT_DIR, short_id)
-            if not os.path.exists(order_folder): os.makedirs(order_folder)
+            # ניקוי ויצירה מחדש של תיקיית הקבצים הזמניים בצורה בטוחה
+            if os.path.exists(TEMP_AI_DIR):
+                try:
+                    shutil.rmtree(TEMP_AI_DIR)
+                    import time
+                    time.sleep(0.5) # השהיה קלה כדי לתת למערכת ההפעלה לשחרר את התיקייה
+                except:
+                    pass
             
-            try: 
-                if os.path.exists(TEMP_AI_DIR): shutil.rmtree(TEMP_AI_DIR)
-            except: pass
-            if not os.path.exists(TEMP_AI_DIR): os.makedirs(TEMP_AI_DIR)
-            
+            # השינוי הקריטי: הוספת exist_ok=True
+            os.makedirs(TEMP_AI_DIR, exist_ok=True)
             generated_files = []
+            
+            # שלב 3: עיבוד המוצרים
             for i, prod in enumerate(products):
                 for loc in ['front', 'back', 'right_sleeve', 'left_sleeve']:
                     loc_d = prod.get(loc, {})
                     if loc_d.get('exists') and loc_d.get('file_url'):
-                        path = download_image(loc_d['file_url'], f"{short_id}_{i}_{loc}")
+                        # שם הקובץ הזמני כולל את ה-4 ספרות
+                        path = download_image(loc_d['file_url'], f"{current_order_4}_{i}_{loc}")
                         if path: loc_d['file'] = path
                 
                 ai_file = process_single_product_to_temp(prod, i, order_folder)
-                if ai_file: generated_files.append(ai_file)
+                if ai_file: 
+                    generated_files.append(ai_file)
             
+            # שלב 4: איחוד לקובץ PDF סופי
             if generated_files:
-                base_name = short_id
-                pdf_name = f"{base_name}.pdf"
-                final_pdf = os.path.join(order_folder, pdf_name)
+                # הגדרת נתיב הקובץ הסופי
+                final_pdf = os.path.join(order_folder, f"{current_order_4}.pdf")
 
+                # אם הקובץ קיים, נוסיף מספר בסוגריים
                 counter = 1
                 while os.path.exists(final_pdf):
-                    pdf_name = f"{base_name} ({counter}).pdf"
-                    final_pdf = os.path.join(order_folder, pdf_name)
+                    final_pdf = os.path.join(order_folder, f"{current_order_4} ({counter}).pdf")
                     counter += 1
 
-                create_and_run_merge_script(generated_files, final_pdf)
+                print(f"DEBUG: Saving Final PDF to: {final_pdf}")
+                create_and_run_merge_script(generated_files, final_pdf, full_data)
             else:
                 print("No files created.")
                 
@@ -550,3 +534,9 @@ if __name__ == "__main__":
             print(f"Error: {e}")
             import traceback
             traceback.print_exc()
+
+
+
+
+
+

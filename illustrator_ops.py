@@ -22,7 +22,55 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 from __future__ import annotations
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -58,7 +106,31 @@ import win32com.client
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 import os
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -82,6 +154,18 @@ import uuid
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 import time
 
 
@@ -94,7 +178,43 @@ import time
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 from typing import Tuple, Optional
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -142,7 +262,43 @@ from typing import Tuple, Optional
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 am = {
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -166,7 +322,31 @@ am = {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
     "B": "Print_Back", 
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -190,7 +370,31 @@ am = {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
     "LS": "Print_Sleeves"
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -226,7 +430,43 @@ am = {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 def hex_to_rgb(h: Optional[str]) -> Tuple[int, int, int]:
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -250,6 +490,18 @@ def hex_to_rgb(h: Optional[str]) -> Tuple[int, int, int]:
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
     h = h.lstrip('#')
 
 
@@ -262,7 +514,31 @@ def hex_to_rgb(h: Optional[str]) -> Tuple[int, int, int]:
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
     if len(h) != 6: return (0,0,0)
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -298,7 +574,43 @@ def hex_to_rgb(h: Optional[str]) -> Tuple[int, int, int]:
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 def run_jsx(app, s: str):
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -322,7 +634,31 @@ def run_jsx(app, s: str):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
     try:
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -346,7 +682,31 @@ def run_jsx(app, s: str):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
     except Exception as e:
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -382,6 +742,30 @@ def run_jsx(app, s: str):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # --- סקריפטים JSX ---
 
 
@@ -394,7 +778,31 @@ def run_jsx(app, s: str):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 JSX_CLEAN_MAGIC = """
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -430,7 +838,43 @@ JSX_CLEAN_MAGIC = """
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // פונקציה להשוואת צבעים
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -454,6 +898,18 @@ function isSameColor(c1, c2) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
     if (!c1 || !c2) return false;
 
 
@@ -466,7 +922,43 @@ function isSameColor(c1, c2) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
     if (c1.typename !== c2.typename) return false;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -514,7 +1006,43 @@ function isSameColor(c1, c2) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     if (c1.typename === 'RGBColor') {
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -538,7 +1066,31 @@ function isSameColor(c1, c2) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
                Math.abs(c1.green - c2.green) <= t && 
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -562,7 +1114,43 @@ function isSameColor(c1, c2) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
     }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -598,7 +1186,31 @@ function isSameColor(c1, c2) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
         return c1.cyan === c2.cyan && c1.magenta === c2.magenta && 
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -622,7 +1234,43 @@ function isSameColor(c1, c2) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
     }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -658,7 +1306,31 @@ function isSameColor(c1, c2) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
         return Math.abs(c1.gray - c2.gray) <= t;
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -682,6 +1354,18 @@ function isSameColor(c1, c2) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
     return false;
 
 
@@ -694,7 +1378,43 @@ function isSameColor(c1, c2) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -730,6 +1450,18 @@ function isSameColor(c1, c2) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 function removeInternalParts(container, bgCol) {
 
 
@@ -742,7 +1474,31 @@ function removeInternalParts(container, bgCol) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
     for (var i = container.pageItems.length - 1; i >= 0; i--) {
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -778,7 +1534,43 @@ function removeInternalParts(container, bgCol) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
         if (item.typename === 'GroupItem') {
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -802,7 +1594,31 @@ function removeInternalParts(container, bgCol) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
         } 
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -826,7 +1642,31 @@ function removeInternalParts(container, bgCol) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
             var colorMatch = false;
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -850,7 +1690,31 @@ function removeInternalParts(container, bgCol) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
             if (item.typename === 'CompoundPathItem' && item.pathItems.length > 0 && 
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -886,7 +1750,43 @@ function removeInternalParts(container, bgCol) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
             if (colorMatch) {
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -910,7 +1810,31 @@ function removeInternalParts(container, bgCol) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
             }
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -934,7 +1858,31 @@ function removeInternalParts(container, bgCol) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
     }
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -970,7 +1918,43 @@ function removeInternalParts(container, bgCol) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 function run(ln, grpN, r, g, b, doC, isRaster) {
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -994,7 +1978,31 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
     // בדיקה ראשונית: אם זה רסטר, מדלגים
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1018,7 +2026,31 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
         if (doC === true) {
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1042,7 +2074,31 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
             try {
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1066,7 +2122,31 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
                 if(groupRefresh) colRec(groupRefresh, c);
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1090,7 +2170,31 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
         }
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1114,7 +2218,31 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
     }
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1150,7 +2278,43 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     try {
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1174,7 +2338,31 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
         var group = doc.pageItems.getByName(grpN);
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1198,7 +2386,31 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
         // 1. ניקוי "זבל" ראשוני מתחתית הקבוצה (קוים שקופים וכו')
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1222,7 +2434,31 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
         for(var k=0; k<2; k++){
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1246,7 +2482,31 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
                 var c = group.pageItems.length;
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1270,7 +2530,31 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
                     var last = group.pageItems[c - 1];
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1294,7 +2578,31 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
                     if (last.typename === "PathItem" && !last.filled && !last.stroked) last.remove();
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1318,7 +2626,31 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
             } catch(e){}
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1354,6 +2686,30 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
         if (group.typename === 'GroupItem' && group.pageItems.length > 0) {
 
 
@@ -1366,7 +2722,31 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
             
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1390,7 +2770,31 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
             var totalW = group.width;
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1414,7 +2818,31 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
             var totalArea = totalW * totalH;
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1438,6 +2866,18 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
             var detectedBgColor = null;
 
 
@@ -1450,7 +2890,31 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
             var keepPeeling = true;
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1486,7 +2950,43 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
             // 2. לולאת "קילוף" - בודקים רק מלמטה!
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1510,7 +3010,31 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
                 
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1534,7 +3058,31 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
                 // באילוסטרייטור: האינדקס הגבוה (length-1) הוא בדרך כלל הפריט הכי תחתון בקבוצה (Back)
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1558,7 +3106,31 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
                 // בקוד הקודם עשינו i-- שזה אומר שהתחלנו מ- length-1. 
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1582,7 +3154,31 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
                 
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1606,7 +3202,31 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
                 var item = group.pageItems[idx];
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1630,7 +3250,31 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
                 var iArea = item.width * item.height;
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1666,7 +3310,43 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
                 // בדיקת מגע בקצוות
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1690,7 +3370,31 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
                 var edgesTouching = 0;
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1714,7 +3418,31 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
                 if (Math.abs(ib[1] - gb[1]) < tolerance) edgesTouching++; // T
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1738,7 +3466,43 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
                 if (Math.abs(ib[3] - gb[3]) < tolerance) edgesTouching++; // B
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1786,7 +3550,43 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
                 // תנאי א: נוגע ב-4 קצוות (רקע מלא)
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1822,7 +3622,43 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
                 // תנאי ב: נוגע ב-3 קצוות (חצי רקע) - חייב להיות לפחות 20% מהשטח כדי לא למחוק פסים דקים
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1858,7 +3694,43 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
                 // תנאי ג: נוגע ב-2 קצוות - חייב להיות גדול (40%) - רקע פינתי
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1894,7 +3766,43 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
                 // תנאי ד: ענק ללא קשר לקצוות (95%)
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1942,7 +3850,55 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
                 if (isBackground) {
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1966,7 +3922,31 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
                     
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1990,7 +3970,31 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
                     if (!detectedBgColor) {
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -2014,7 +4018,31 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
                         else if (item.typename === 'CompoundPathItem' && item.pathItems.length > 0 && item.pathItems[0].filled) 
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -2038,6 +4066,18 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
                     }
 
 
@@ -2050,7 +4090,31 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
                     
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -2074,7 +4138,31 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
                     item.remove();
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -2098,7 +4186,31 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
                     // ממשיכים בלולאה (keepPeeling נשאר true) כדי לבדוק את השכבה שמתחתיה שנחשפה עכשיו
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -2122,7 +4234,31 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
                     // הגענו לפריט שהוא לא רקע (למשל הלוגו)
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -2146,7 +4282,31 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
                     keepPeeling = false;
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -2170,7 +4330,43 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
             }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -2206,7 +4402,31 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
             if (detectedBgColor) {
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -2230,6 +4450,18 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
             }
 
 
@@ -2242,7 +4474,43 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
         }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -2278,7 +4546,31 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
         if (doC === true) {
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -2302,7 +4594,31 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
             try {
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -2326,7 +4642,31 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
                 if(groupRefresh) colRec(groupRefresh, c);
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -2350,7 +4690,31 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
         }
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -2374,7 +4738,43 @@ function run(ln, grpN, r, g, b, doC, isRaster) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -2410,7 +4810,31 @@ function colRec(it, c) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
     try {
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -2434,7 +4858,31 @@ function colRec(it, c) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
             for (var i=0; i<it.pageItems.length; i++) colRec(it.pageItems[i], c);
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -2458,7 +4906,31 @@ function colRec(it, c) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
             it.filled=true; it.fillColor=c; it.stroked=false;
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -2482,7 +4954,31 @@ function colRec(it, c) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
             for (var j=0; j<it.pathItems.length; j++) {
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -2506,7 +5002,31 @@ function colRec(it, c) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
                     it.pathItems[j].filled=true; it.pathItems[j].fillColor=c; it.pathItems[j].stroked=false;
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -2530,7 +5050,31 @@ function colRec(it, c) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
             }
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -2554,6 +5098,18 @@ function colRec(it, c) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
     } catch(e) { }
 
 
@@ -2566,7 +5122,43 @@ function colRec(it, c) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -2602,7 +5194,31 @@ try{
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
     var isR = ("%ISRASTER%" === "true"); 
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -2626,7 +5242,31 @@ try{
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
     run("%LNAME%", "%GNAME%", %R%, %G%, %B%, doColor, isR); 
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -2662,7 +5302,37 @@ try{
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 """
+
+
+
+
+
+
 
 
 
@@ -2671,7 +5341,16 @@ try{
 JSX_DUPLICATE_AND_POS = """
 
 
+
+
+
 #target illustrator
+
+
+
+
+
+
 
 
 
@@ -2680,49 +5359,97 @@ JSX_DUPLICATE_AND_POS = """
 function runSim(originalName, simName, r, g, b, prefix, category, doRecolor) {
 
 
+
+
+
     try {
+
+
+
 
 
         var doc = app.activeDocument;
 
 
+
+
+
         var original = null;
+
+
+
 
 
         try { original = doc.pageItems.getByName(originalName); } catch(e) { return; }
 
 
+
+
+
         
+
+
+
 
 
         var simLayer = doc.layers.getByName("Simulation");
 
 
+
+
+
         var targetLayer = null;
 
 
+
+
+
         
+
+
+
 
 
         var sideName = "";
 
 
+
+
+
         if(prefix=="F") sideName = "Front";
+
+
+
 
 
         if(prefix=="B") sideName = "Back";
 
 
+
+
+
         if(prefix=="RS") sideName = "Right_Sleeve";
+
+
+
 
 
         if(prefix=="LS") sideName = "Left_Sleeve";
 
 
+
+
+
         
 
 
+
+
+
         try { targetLayer = simLayer.layers.getByName("S_Placement_" + sideName); } 
+
+
+
 
 
         catch(e) { return; }
@@ -2731,7 +5458,16 @@ function runSim(originalName, simName, r, g, b, prefix, category, doRecolor) {
 
 
 
+
+
+
+
+
+
         targetLayer.visible = true;
+
+
+
 
 
         simLayer.visible = true;
@@ -2740,10 +5476,22 @@ function runSim(originalName, simName, r, g, b, prefix, category, doRecolor) {
 
 
 
+
+
+
+
+
+
         var simItem = original.duplicate(targetLayer, ElementPlacement.PLACEATEND);
 
 
+
+
+
         simItem.name = simName;
+
+
+
 
 
         simItem.hidden = false;
@@ -2752,13 +5500,28 @@ function runSim(originalName, simName, r, g, b, prefix, category, doRecolor) {
 
 
 
+
+
+
+
+
+
         if (doRecolor === true) {
+
+
+
 
 
             var c = new RGBColor(); c.red=r; c.green=g; c.blue=b;
 
 
+
+
+
             recolorItem(simItem, c);
+
+
+
 
 
         }
@@ -2767,19 +5530,43 @@ function runSim(originalName, simName, r, g, b, prefix, category, doRecolor) {
 
 
 
+
+
+
+
+
+
         doSmartPos(simItem, prefix, category);
+
+
+
 
 
         simItem.name = "";
 
 
+
+
+
         
+
+
+
 
 
     } catch(e) { }
 
 
+
+
+
 }
+
+
+
+
+
+
 
 
 
@@ -2788,16 +5575,34 @@ function runSim(originalName, simName, r, g, b, prefix, category, doRecolor) {
 function recolorItem(it, c) {
 
 
+
+
+
     if (it.typename === 'GroupItem') for(var i=0; i<it.pageItems.length; i++) recolorItem(it.pageItems[i], c);
+
+
+
 
 
     else if (it.typename === 'PathItem' && !it.clipping) { it.filled=true; it.fillColor=c; it.stroked=false; }
 
 
+
+
+
     else if (it.typename === 'CompoundPathItem') for(var j=0; j<it.pathItems.length; j++) if(!it.pathItems[j].clipping) { it.pathItems[j].filled=true; it.pathItems[j].fillColor=c; it.pathItems[j].stroked=false; }
 
 
+
+
+
 }
+
+
+
+
+
+
 
 
 
@@ -2809,13 +5614,28 @@ function getDist(p1, p2) { return Math.sqrt(Math.pow(p2[0] - p1[0], 2) + Math.po
 
 
 
+
+
+
+
+
+
 function doSmartPos(item, prefix, category) {
+
+
+
 
 
     var itemW = item.width; var itemH = item.height; if(itemH == 0) itemH = 1;
 
 
+
+
+
     var suffix = "A4_Square";
+
+
+
 
 
     var catLower = category.toLowerCase();
@@ -2824,40 +5644,85 @@ function doSmartPos(item, prefix, category) {
 
 
 
+
+
+
+
+
+
     if (category === "Sleeve2") suffix = "Sleeve2"; 
+
+
+
 
 
     else if (catLower.indexOf("sleeve") !== -1 || catLower.indexOf("9") !== -1 || catLower.indexOf("שרוול") !== -1) suffix = "Sleeve";
 
 
+
+
+
     else if (category === "Pocket") suffix = "Pocket";
+
+
+
 
 
     else if (category === "2") { suffix = "2"; } // כאן היה חסר הסוגר שגרם לשגיאה!
 
 
+
+
+
     else if (category === "A3") suffix = "A3";
+
+
+
 
 
     else if (category === "A5") suffix = "A5";
 
 
+
+
+
     else if (category === "A4") {
+
+
+
 
 
         var ratio = itemW / itemH;
 
 
+
+
+
         if (ratio > 1.21) suffix = "A4_Landscape"; 
+
+
+
 
 
         else if (ratio < 0.75) suffix = "A4_Portrait"; 
 
 
+
+
+
         else suffix = "A4_Square";
 
 
+
+
+
     }
+
+
+
+
+
+
 
 
 
@@ -2866,40 +5731,79 @@ function doSmartPos(item, prefix, category) {
     var boxName = "S" + prefix + "_Box_" + suffix;
 
 
+
+
+
     var box = null;
+
+
+
 
 
     try { box = app.activeDocument.pageItems.getByName(boxName); } catch(e) { return; } 
 
 
+
+
+
     
+
+
+
 
 
     var trueBoxW = 0; var trueBoxH = 0; var angleDeg = 0;
 
 
+
+
+
     if (box.typename === "PathItem" && box.pathPoints.length > 1) {
+
+
+
 
 
         var p0 = box.pathPoints[0].anchor; var p1 = box.pathPoints[1].anchor; var p2 = box.pathPoints[2].anchor;
 
 
+
+
+
         var d01 = getDist(p0, p1); var d12 = getDist(p1, p2);
+
+
+
 
 
         if (suffix === "Sleeve") { trueBoxW = Math.max(d01, d12); trueBoxH = Math.min(d01, d12); } else { trueBoxW = d01; trueBoxH = d12; }
 
 
+
+
+
         var angleRad = Math.atan2(p1[1] - p0[1], p1[0] - p0[0]); angleDeg = angleRad * 180 / Math.PI;
+
+
+
 
 
     } else { trueBoxW = box.width; trueBoxH = box.height; }
 
 
+
+
+
     
 
 
+
+
+
     var scaleW = (trueBoxW / itemW) * 100.0; var scaleH = (trueBoxH / itemH) * 100.0;
+
+
+
 
 
     var scale = Math.min(scaleW, scaleH);
@@ -2908,34 +5812,73 @@ function doSmartPos(item, prefix, category) {
 
 
 
+
+
+
+
+
+
     item.resize(scale, scale);
+
+
+
 
 
     var b = box.visibleBounds;
 
 
+
+
+
     var cx = b[0] + (b[2] - b[0])/2.0; var cy = b[1] - (b[1] - b[3])/2.0;
+
+
+
 
 
     item.position = [cx - item.width/2.0, cy + item.height/2.0];
 
 
+
+
+
     
+
+
+
 
 
     if (Math.abs(angleDeg) > 0.5) {
 
 
+
+
+
         if (Math.abs(angleDeg) > 90) angleDeg += 180;
+
+
+
 
 
         item.rotate(angleDeg);
 
 
+
+
+
     }
 
 
+
+
+
 }
+
+
+
+
+
+
 
 
 
@@ -2944,103 +5887,208 @@ function doSmartPos(item, prefix, category) {
 try { var doRec = ("%DORECOLOR%" === "true"); runSim("%ORIG%", "%SIM%", %R%, %G%, %B%, "%PRE%", "%CAT%", doRec); } catch(e) { }
 
 
+
+
+
 """
+
+
 
 JSX_SMART_POS = """
+
 #target illustrator
 
+
+
 function smartPos(itemName, prefix, category, resizeArtboard, isPrint, artboardName) {
+
     try {
+
         var doc = app.activeDocument;
+
         var item = doc.pageItems.getByName(itemName);
+
         item.hidden = false;
+
         var itemW = item.width; var itemH = item.height; if(itemH == 0) itemH = 1;
+
         var suffix = "A4_Square";
+
         var catLower = category.toLowerCase();
 
+
+
         // 1. זיהוי תיבת המיקום
+
         if (category === "Sleeve2") suffix = "Sleeve2";
+
         else if (catLower.indexOf("sleeve") !== -1 || catLower.indexOf("9") !== -1 || catLower.indexOf("שרוול") !== -1) suffix = "Sleeve";
+
         else if (category === "Pocket") suffix = "Pocket";
+
         else if (category === "2") suffix = "2";
+
         else if (category === "A3") suffix = "A3";
+
         else if (category === "A5") suffix = "A5";
+
         else if (category === "A4") {
+
             var ratio = itemW / itemH;
+
             if (ratio > 1.21) suffix = "A4_Landscape"; 
+
             else if (ratio < 0.75) suffix = "A4_Portrait"; 
+
             else suffix = "A4_Square";
+
         }
+
+
 
         var boxPrefix = isPrint ? prefix : "S" + prefix;
+
         var boxName = boxPrefix + "_Box_" + suffix;
+
         var box = null;
+
         try { box = doc.pageItems.getByName(boxName); } catch(e) { return; } 
+
         var b = box.visibleBounds; 
+
         var boxW = b[2] - b[0]; var boxH = b[1] - b[3];
+
         var cx = b[0] + boxW/2.0; var cy = b[1] - boxH/2.0;
+
         var scale = 100.0;
 
+
+
         // שינוי גודל האלמנט
+
         if (suffix === "Sleeve") {
+
             var maxW = 255.0; var maxH = 170.0;
+
             var scaleW = (maxW / itemW) * 100.0;
+
             var scaleH = (maxH / itemH) * 100.0;
+
             scale = Math.min(scaleW, scaleH);
+
         } else {
+
             var sW = (boxW / itemW) * 100.0; var sH = (boxH / itemH) * 100.0;
+
             scale = Math.min(sW, sH);
+
         }
+
+
 
         item.resize(scale, scale);
+
         item.position = [cx - item.width/2.0, cy + item.height/2.0];
 
+
+
         // 2. שינוי גודל הדף (רק אם זה לא A4 מרובע!)
+
         // התיקון כאן: הוספת התנאי suffix !== "A4_Square"
+
         if (isPrint && resizeArtboard === true && artboardName && suffix !== "A4_Square") {
+
             try {
+
                 var ab = doc.artboards.getByName(artboardName);
+
                 var oldRect = ab.artboardRect; 
+
                 
+
                 var newW = 595.28; // A4 width
+
                 var newH = 841.89; // A4 height
+
                 
+
                 if (boxW > boxH) {
+
                     newW = 841.89; 
+
                     newH = 595.28;
+
                 }
 
+
+
                 var minX = oldRect[0] + (newW / 2);
+
                 var maxX = oldRect[2] - (newW / 2);
+
                 var minY = oldRect[3] + (newH / 2);
+
                 var maxY = oldRect[1] - (newH / 2);
 
+
+
                 var targetX = cx;
+
                 var targetY = cy;
 
+
+
                 var finalX = Math.max(minX, Math.min(targetX, maxX));
+
                 var finalY = Math.min(maxY, Math.max(minY, targetY));
 
+
+
                 ab.artboardRect = [
+
                     finalX - newW/2, 
+
                     finalY + newH/2, 
+
                     finalX + newW/2, 
+
                     finalY - newH/2
+
                 ];
+
                 
+
             } catch(e) { }
+
         }
+
     } catch(e) { }
+
 }
 
+
+
 try { var isRes = ("%RES%" === "true"); var isP = ("%ISP%" === "true"); smartPos("%ITEM%", "%PRE%", "%CAT%", isRes, isP, "%ABNAME%"); } catch(e) { }
+
 """
+
+
+
 
 
 JSX_COLOR_PROD = """
 
 
+
+
+
 #target illustrator
+
+
+
+
+
+
 
 
 
@@ -3049,52 +6097,103 @@ JSX_COLOR_PROD = """
 function col(it, r, g, b, sr, sg, sb) {
 
 
+
+
+
     var f = new RGBColor(); f.red=r; f.green=g; f.blue=b;
+
+
+
 
 
     var s = new RGBColor(); s.red=sr; s.green=sg; s.blue=sb;
 
 
+
+
+
     
+
+
+
 
 
     if(it.name && (it.name.indexOf("String")!==-1 || it.name.indexOf("מיתר")!==-1)) return;
 
 
+
+
+
     
+
+
+
 
 
     if(it.typename==='PathItem' && !it.clipping){
 
 
+
+
+
         it.filled=true; it.fillColor=f; 
+
+
+
 
 
         it.stroked=true; it.strokeColor=s; it.strokeWidth=1; // חזרה לצבע מנוגד עבור המיתרים
 
 
+
+
+
     } else if(it.typename==='CompoundPathItem'){
+
+
+
 
 
         for(var i=0; i<it.pathItems.length; i++){
 
 
+
+
+
             var p=it.pathItems[i];
+
+
+
 
 
             if(!p.clipping){ p.filled=true; p.fillColor=f; p.stroked=true; p.strokeColor=s; }
 
 
+
+
+
         }
+
+
+
 
 
     } else if(it.typename==='GroupItem'){
 
 
+
+
+
         for(var j=0; j<it.pageItems.length; j++) col(it.pageItems[j], r, g, b, sr, sg, sb);
 
 
+
+
+
     }
+
+
+
 
 
 }
@@ -3103,22 +6202,46 @@ function col(it, r, g, b, sr, sg, sb) {
 
 
 
+
+
+
+
+
+
 try {
+
+
+
 
 
     var d = app.activeDocument;
 
 
+
+
+
     var l = d.layers.getByName("Simulation");
+
+
+
 
 
     var mainGrp = null;
 
 
+
+
+
     try { mainGrp = l.groupItems.getByName("Simulation"); } catch(e) {}
 
 
+
+
+
     if(!mainGrp) try { mainGrp = l.groupItems.getByName("%PROD%"); } catch(e) {}
+
+
+
 
 
     if(!mainGrp) try { mainGrp = l.groupItems.getByName("Shirt"); } catch(e) {}
@@ -3127,13 +6250,28 @@ try {
 
 
 
+
+
+
+
+
+
     if(mainGrp) {
+
+
+
 
 
         var isSplit = ("%IS_SPLIT%" === "true");
 
 
+
+
+
         var hasSide1 = false; var hasSide2 = false;
+
+
+
 
 
         var s1, s2;
@@ -3142,7 +6280,16 @@ try {
 
 
 
+
+
+
+
+
+
         try { s1 = mainGrp.groupItems.getByName("Side1"); hasSide1 = true; } catch(e) {}
+
+
+
 
 
         try { s2 = mainGrp.groupItems.getByName("Side2"); hasSide2 = true; } catch(e) {}
@@ -3151,31 +6298,67 @@ try {
 
 
 
+
+
+
+
+
+
         if(isSplit && hasSide1 && hasSide2) {
+
+
+
 
 
             col(s1, %R1%, %G1%, %B1%, %SR1%, %SG1%, %SB1%);
 
 
+
+
+
             col(s2, %R2%, %G2%, %B2%, %SR2%, %SG2%, %SB2%);
+
+
+
 
 
         } else {
 
 
+
+
+
             col(mainGrp, %R1%, %G1%, %B1%, %SR1%, %SG1%, %SB1%);
+
+
+
 
 
         }
 
 
+
+
+
     }
+
+
+
 
 
 } catch(e) { }
 
 
+
+
+
 """
+
+
+
+
+
+
 
 
 
@@ -3193,7 +6376,31 @@ JSX_DEL = """
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 #target illustrator
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -3217,6 +6424,18 @@ try{app.activeDocument.artboards.getByName("%AB%").remove();}catch(e){}
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 try{app.activeDocument.textFrames.getByName("%TF%").remove();}catch(e){}
 
 
@@ -3229,7 +6448,43 @@ try{app.activeDocument.textFrames.getByName("%TF%").remove();}catch(e){}
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 """
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -3265,6 +6520,18 @@ JSX_CLEAN_BOXES = """
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 #target illustrator
 
 
@@ -3277,7 +6544,31 @@ JSX_CLEAN_BOXES = """
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 try {
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -3301,7 +6592,31 @@ try {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
     // רצים בלולאה הפוכה (חשוב מאוד במחיקה)
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -3325,7 +6640,31 @@ try {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
         var item = doc.pageItems[i];
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -3349,7 +6688,31 @@ try {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
         if (item.name.indexOf("_Box_") !== -1) {
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -3373,7 +6736,31 @@ try {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
         }
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -3397,6 +6784,18 @@ try {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 } catch(e) {}
 
 
@@ -3409,7 +6808,25 @@ try {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 """
+
+
+
+
+
+
 
 
 
@@ -3418,19 +6835,37 @@ try {
 JSX_EXTRA_COLORS = """
 
 
+
+
+
 #target illustrator
+
+
+
 
 
 try {
 
 
+
+
+
     var doc = app.activeDocument;
+
+
+
 
 
     var container = null;
 
 
+
+
+
     try { container = doc.layers.getByName("Simulation").groupItems.getByName("Box_Color"); } catch(e) {}
+
+
+
 
 
     if (!container) try { container = doc.layers.getByName("Simulation").layers.getByName("Box_Color"); } catch(e) {}
@@ -3439,28 +6874,61 @@ try {
 
 
 
+
+
+
+
+
+
     if (container) {
+
+
+
 
 
         var allData = %COLOR_ARRAY%; 
 
 
+
+
+
         function applyStyle(item, rgb) {
+
+
+
 
 
             var c = new RGBColor(); c.red = rgb[0]; c.green = rgb[1]; c.blue = rgb[2];
 
 
+
+
+
             var black = new RGBColor(); black.red = 0; black.green = 0; black.blue = 0;
+
+
+
 
 
             item.filled = true; item.fillColor = c;
 
 
+
+
+
             item.stroked = true; item.strokeColor = black; item.strokeWidth = 0.5;
 
 
+
+
+
         }
+
+
+
+
+
+
 
 
 
@@ -3469,76 +6937,154 @@ try {
         for (var i = 1; i <= 24; i++) {
 
 
+
+
+
             try {
+
+
+
 
 
                 var box = container.pageItems.getByName("Color_" + i);
 
 
+
+
+
                 if (i <= allData.length) {
+
+
+
 
 
                     var colors = allData[i-1]; 
 
 
+
+
+
                     if (colors.length === 1) {
+
+
+
 
 
                         applyStyle(box, colors[0]);
 
 
+
+
+
                     } else if (colors.length >= 2) {
+
+
+
 
 
                         // שימוש ב-geometricBounds לדיוק מתמטי (ללא ה-Stroke בחישוב)
 
 
+
+
+
                         var b = box.geometricBounds; 
+
+
+
 
 
                         var left = b[0]; var top = b[1]; var right = b[2]; var bottom = b[3];
 
 
+
+
+
                         var w = right - left; var h = top - bottom;
+
+
+
 
 
                         
 
 
+
+
+
                         var leftRect = box.parent.pathItems.rectangle(top, left, w/2, h);
+
+
+
 
 
                         applyStyle(leftRect, colors[0]);
 
 
+
+
+
                         var rightRect = box.parent.pathItems.rectangle(top, left + w/2, w/2, h);
+
+
+
 
 
                         applyStyle(rightRect, colors[1]);
 
 
+
+
+
                         box.remove();
+
+
+
 
 
                     }
 
 
+
+
+
                 } else { box.remove(); }
+
+
+
 
 
             } catch(e) {}
 
 
+
+
+
         }
+
+
+
 
 
     }
 
 
+
+
+
 } catch(e) {}
 
 
+
+
+
 """
+
+
+
+
+
+
 
 
 
@@ -3556,7 +7102,31 @@ JSX_MEASURE_FINAL = """
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 #target illustrator
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -3580,7 +7150,31 @@ try {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
     var doc = app.activeDocument;
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -3604,7 +7198,31 @@ try {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
     var item = doc.pageItems.getByName("%NAME%");
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -3628,7 +7246,31 @@ try {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
     item.width;
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -3652,6 +7294,18 @@ try {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
     0;
 
 
@@ -3664,7 +7318,31 @@ try {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 }
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -3712,7 +7390,55 @@ try {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # -------------------------
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -3736,7 +7462,43 @@ try {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 # -------------------------
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -3772,7 +7534,31 @@ def get_doc_safe(app):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
     for i in range(5):
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -3796,7 +7582,31 @@ def get_doc_safe(app):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
             if app.Documents.Count > 0:
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -3820,6 +7630,18 @@ def get_doc_safe(app):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
         except:
 
 
@@ -3832,7 +7654,31 @@ def get_doc_safe(app):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
             time.sleep(0.5)
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -3868,7 +7714,43 @@ def get_doc_safe(app):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 def get_layer(doc, name):
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -3892,7 +7774,31 @@ def get_layer(doc, name):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
         l = doc.Layers(name)
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -3916,7 +7822,31 @@ def get_layer(doc, name):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
         return l
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -3952,7 +7882,43 @@ def get_layer(doc, name):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 def clean_arts(grp):
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -3976,7 +7942,31 @@ def clean_arts(grp):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
         if grp.PageItems.Count > 0:
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -4000,6 +7990,18 @@ def clean_arts(grp):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
             if getattr(last, "TypeName", "") in ["GroupItem", "PathItem"]:
 
 
@@ -4012,7 +8014,31 @@ def clean_arts(grp):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
                 last.Delete()
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -4048,7 +8074,43 @@ def clean_arts(grp):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # -------------------------
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -4072,7 +8134,43 @@ def clean_arts(grp):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 # -------------------------
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -4108,7 +8206,43 @@ def update_size_label(doc, app, name, w, txt):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
     if w <= 1: return 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -4144,6 +8278,18 @@ def update_size_label(doc, app, name, w, txt):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
     final_text = f"{width_cm} ס\"מ הדפס {txt}"
 
 
@@ -4156,7 +8302,31 @@ def update_size_label(doc, app, name, w, txt):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
     
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -4180,7 +8350,31 @@ def update_size_label(doc, app, name, w, txt):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
     try {{
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -4204,7 +8398,31 @@ def update_size_label(doc, app, name, w, txt):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
         var simLayer = null;
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -4228,7 +8446,31 @@ def update_size_label(doc, app, name, w, txt):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
         
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -4252,7 +8494,31 @@ def update_size_label(doc, app, name, w, txt):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
             function find(container, n) {{
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -4276,7 +8542,31 @@ def update_size_label(doc, app, name, w, txt):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
                 if (container.groupItems) {{
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -4300,7 +8590,31 @@ def update_size_label(doc, app, name, w, txt):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
                         var r = find(container.groupItems[i], n);
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -4324,7 +8638,31 @@ def update_size_label(doc, app, name, w, txt):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
                     }}
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -4348,6 +8686,18 @@ def update_size_label(doc, app, name, w, txt):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
                 return null;
 
 
@@ -4360,7 +8710,31 @@ def update_size_label(doc, app, name, w, txt):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
             }}
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -4384,7 +8758,31 @@ def update_size_label(doc, app, name, w, txt):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
             var t = find(simLayer, "{name}");
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -4408,7 +8806,31 @@ def update_size_label(doc, app, name, w, txt):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
                 var p = t;
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -4432,7 +8854,31 @@ def update_size_label(doc, app, name, w, txt):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
                 t.contents = '{final_text}'; 
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -4456,7 +8902,31 @@ def update_size_label(doc, app, name, w, txt):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
         }}
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -4480,7 +8950,31 @@ def update_size_label(doc, app, name, w, txt):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
     """
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -4494,168 +8988,334 @@ def update_size_label(doc, app, name, w, txt):
 
     run_jsx(app, jsx)
 
+
+
 def place_and_simulate_print(doc, app, path, pre, cat, p_hex, s_hex, is_raster=False):
+
     print(f"--- Processing {pre} ---")
+
     
+
     l_map = {"F":"Print_Front","B":"Print_Back","RS":"Print_Right_Sleeve","LS":"Print_Left_Sleeve"}
+
     
+
     # וידוא מסמך
+
     doc = get_doc_safe(app)
+
     if not doc: return 0
 
+
+
     p_lay = get_layer(doc, l_map[pre])
+
     if not p_lay: return 0
 
+
+
     unique_name_print = f"P_{pre}_{uuid.uuid4().hex[:6]}"
+
     
+
     # משתנה זמני לבדיקה שההטמעה הצליחה
+
     initial_check_w = 0 
 
+
+
     try:
+
         # בדיקה אם הקובץ הוא SVG אך מסומן כ"ללא וקטור" (Raster)
+
         is_svg_no_vector = is_raster and path.lower().endswith('.svg')
 
+
+
         if is_raster or is_svg_no_vector:
+
             # --- הטמעת רסטר (תמונה או SVG "ללא וקטור") ---
+
             safe_path = path.replace('\\', '\\\\') 
+
             jsx_place_raster = f"""
+
             #target illustrator
+
             function placeRaster(filePath, layerName, itemName) {{
+
                 try {{
+
                     var doc = app.activeDocument;
+
                     var layer = doc.layers.getByName(layerName);
+
                     var file = new File("{safe_path}");
+
                     var placedItem = layer.placedItems.add();
+
                     placedItem.file = file;
+
                     placedItem.name = itemName; 
+
                     try {{ placedItem.embed(); }} catch(e) {{}}
+
                     return placedItem.width;
+
                 }} catch(e) {{ return 0; }}
+
             }}
+
             placeRaster('{safe_path}', '{l_map[pre]}', '{unique_name_print}');
+
             """
+
             raw_width = app.DoJavaScript(jsx_place_raster)
+
             initial_check_w = float(raw_width)
 
+
+
         else:
+
             # --- הטמעת וקטור רגילה (פתיחה ופירוק) ---
+
             imported_group = p_lay.GroupItems.CreateFromFile(path)
+
             clean_arts(imported_group)
+
             imported_group.Name = unique_name_print
+
             initial_check_w = imported_group.Width
 
+
+
     except Exception as e:
+
         print(f"Fatal Import Error: {e}")
+
         return 0
+
     
+
     if initial_check_w == 0: return 0
 
+
+
     # 1. ניקוי וצביעה
+
     r, g, b = (0,0,0)
+
     do_col = 'false'
+
     if p_hex:
+
         r, g, b = hex_to_rgb(p_hex)
+
         do_col = 'true'
+
     
+
     # מעבירים לסקריפט הניקוי האם זה רסטר. אם כן - הוא מדלג על הניקוי.
+
     is_raster_str = "true" if (is_raster or is_svg_no_vector) else "false"
+
     
+
     # מריצים את הניקוי (או מדלגים אם זה רסטר)
+
     sc = JSX_CLEAN_MAGIC.replace('%LNAME%', l_map[pre]).replace('%GNAME%', unique_name_print)
+
     sc = sc.replace('%R%', str(r)).replace('%G%', str(g)).replace('%B%', str(b))
+
     sc = sc.replace('%DOCOL%', do_col)
+
     sc = sc.replace('%ISRASTER%', is_raster_str) 
+
     run_jsx(app, sc)
+
     
+
     time.sleep(0.2)
 
+
+
     # 2. מיקום חכם ושינוי גודל
+
     resize = "true" if cat in ["Pocket", "A4", "A5", "2"] else "false"
+
     is_p = "true"
+
     ab_name = am.get(pre, "")
+
     
+
     sc_pos = JSX_SMART_POS.replace('%ITEM%', unique_name_print)
+
     sc_pos = sc_pos.replace('%PRE%', pre).replace('%CAT%', cat)
+
     sc_pos = sc_pos.replace('%RES%', resize).replace('%ISP%', is_p)
+
     sc_pos = sc_pos.replace('%ABNAME%', ab_name)
+
     
+
     run_jsx(app, sc_pos)
+
     
+
     # 3. הדמיה (שכפול)
+
     unique_name_sim = f"S_{pre}_{uuid.uuid4().hex[:6]}"
+
     should_recolor_sim = 'false'
+
     rs, gs, bs = (0,0,0)
+
     
+
     if s_hex:
+
         rs, gs, bs = hex_to_rgb(s_hex)
+
         should_recolor_sim = 'true'
+
     elif p_hex:
+
         rs, gs, bs = hex_to_rgb(p_hex)
+
         should_recolor_sim = 'true'
+
     
+
     sc_dup = JSX_DUPLICATE_AND_POS.replace('%ORIG%', unique_name_print)
+
     sc_dup = sc_dup.replace('%SIM%', unique_name_sim)
+
     sc_dup = sc_dup.replace('%R%', str(rs)).replace('%G%', str(gs)).replace('%B%', str(bs))
+
     sc_dup = sc_dup.replace('%PRE%', pre).replace('%CAT%', cat)
+
     sc_dup = sc_dup.replace('%DORECOLOR%', should_recolor_sim)
+
     
+
     run_jsx(app, sc_dup)
+
     
+
     p_lay.Visible = True
+
     
+
     # 4. === מדידה סופית ומדויקת ===
+
     final_true_width = 0
+
     try:
+
         measure_jsx = JSX_MEASURE_FINAL.replace("%NAME%", unique_name_print)
+
         res = app.DoJavaScript(measure_jsx)
+
         final_true_width = float(res)
+
     except:
+
         final_true_width = initial_check_w 
 
+
+
     # 5. עדכון טקסט עם הרוחב הנכון
+
     if final_true_width > 0:
+
         target_tf = ""
+
         txt_suffix = ""
+
         
+
         if pre == "F": 
+
             target_tf = "size_Front"
+
             txt_suffix = "קדמי"
+
         elif pre == "B": 
+
             target_tf = "size_Back"
+
             txt_suffix = "אחורי"
+
         elif pre == "RS":
+
             target_tf = "size_Right_Sleeve"
+
             txt_suffix = "שרוול ימין"
+
         elif pre == "LS":
+
             target_tf = "size_Left_Sleeve"
+
             txt_suffix = "שרוול שמאל"
+
         
+
         if target_tf:
+
             # התיקון כאן: שימוש ב-txt_suffix במקום txt
+
             update_size_label(doc, app, target_tf, final_true_width, txt_suffix)
+
             
+
     return final_true_width
 
+
+
     
+
 def open_and_color_template(path: str, h1: str, h2: str, is_split: bool, prod: str="Shirt"):
+
+
+
 
 
     print(f"--- Opening AI: {os.path.basename(path)} ---")
 
 
+
+
+
     app = win32com.client.Dispatch("Illustrator.Application")
+
+
+
 
 
     app.UserInteractionLevel = -1 
 
 
+
+
+
     doc = app.Open(path) 
+
+
+
 
 
     
 
 
+
+
+
     r1, g1, b1 = hex_to_rgb(h1)
+
+
+
 
 
     r2, g2, b2 = hex_to_rgb(h2)
@@ -4664,10 +9324,22 @@ def open_and_color_template(path: str, h1: str, h2: str, is_split: bool, prod: s
 
 
 
+
+
+
+
+
+
     # חישוב צבע ה-Stroke (המיתר) - לבן לכהה, שחור לבהיר
 
 
+
+
+
     sr1, sg1, sb1 = (255, 255, 255) if (0.299*r1 + 0.587*g1 + 0.114*b1) < 128 else (0, 0, 0)
+
+
+
 
 
     sr2, sg2, sb2 = (255, 255, 255) if (0.299*r2 + 0.587*g2 + 0.114*b2) < 128 else (0, 0, 0)
@@ -4676,40 +9348,82 @@ def open_and_color_template(path: str, h1: str, h2: str, is_split: bool, prod: s
 
 
 
+
+
+
+
+
+
     s = JSX_COLOR_PROD.replace('%PROD%', prod)
+
+
+
 
 
     s = s.replace('%IS_SPLIT%', "true" if is_split else "false")
 
 
+
+
+
     
+
+
+
 
 
     # החלפת ערכים לצד 1
 
 
+
+
+
     s = s.replace('%R1%', str(r1)).replace('%G1%', str(g1)).replace('%B1%', str(b1))
+
+
+
 
 
     s = s.replace('%SR1%', str(sr1)).replace('%SG1%', str(sg1)).replace('%SB1%', str(sb1))
 
 
+
+
+
     
+
+
+
 
 
     # החלפת ערכים לצד 2
 
 
+
+
+
     s = s.replace('%R2%', str(r2)).replace('%G2%', str(g2)).replace('%B2%', str(b2))
+
+
+
 
 
     s = s.replace('%SR2%', str(sr2)).replace('%SG2%', str(sg2)).replace('%SB2%', str(sb2))
 
 
+
+
+
     
 
 
+
+
+
     run_jsx(app, s)
+
+
+
 
 
     return doc, app
@@ -4718,7 +9432,25 @@ def open_and_color_template(path: str, h1: str, h2: str, is_split: bool, prod: s
 
 
 
+
+
+
+
+
+
 def delete_side_assets(doc, app, ab: str, tf: str):
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -4754,7 +9486,43 @@ def delete_side_assets(doc, app, ab: str, tf: str):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 def save_pdf(doc, path: str):
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -4778,7 +9546,31 @@ def save_pdf(doc, path: str):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
         o = win32com.client.Dispatch("Illustrator.PDFSaveOptions")
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -4802,7 +9594,31 @@ def save_pdf(doc, path: str):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
         doc.SaveAs(path, o)
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -4826,6 +9642,18 @@ def save_pdf(doc, path: str):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
     finally:
 
 
@@ -4838,7 +9666,31 @@ def save_pdf(doc, path: str):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
         try: doc.Close(2)
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -4874,7 +9726,43 @@ def save_pdf(doc, path: str):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 def clean_layout(app):
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -4898,7 +9786,25 @@ def clean_layout(app):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
     run_jsx(app, JSX_CLEAN_BOXES)
+
+
+
+
+
+
 
 
 
@@ -4907,28 +9813,55 @@ def clean_layout(app):
 def apply_extra_colors(app, extra_data_list: list):
 
 
+
+
+
     import json
+
+
+
 
 
     # וודאי שאין שימוש בשם hex_list אם הוא לא הוגדר
 
 
+
+
+
     if not extra_data_list:
+
+
+
 
 
         extra_data_list = []
 
 
+
+
+
     
+
+
+
 
 
     formatted_rgb = []
 
 
+
+
+
     for pair in extra_data_list:
 
 
+
+
+
         rgb_pair = [list(hex_to_rgb(h)) for h in pair]
+
+
+
 
 
         formatted_rgb.append(rgb_pair)
@@ -4937,10 +9870,22 @@ def apply_extra_colors(app, extra_data_list: list):
 
 
 
+
+
+
+
+
+
     rgb_json = json.dumps(formatted_rgb)
 
 
+
+
+
     final_jsx = JSX_EXTRA_COLORS.replace("%COLOR_ARRAY%", rgb_json)
+
+
+
 
 
     run_jsx(app, final_jsx)
