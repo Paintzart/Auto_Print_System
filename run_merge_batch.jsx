@@ -1,6 +1,6 @@
 
     #target illustrator
-    var files = ["C:/Users/yarde/OneDrive/Desktop/Auto_Print_System/temp_ai_files/temp_0.ai"];
+    var files = ["C:/Users/yarde/OneDrive/Desktop/Auto_Print_System/temp_ai_files/temp_0.ai", "C:/Users/yarde/OneDrive/Desktop/Auto_Print_System/temp_ai_files/temp_1.ai"];
     
     function main() {
         if (files.length === 0) return;
@@ -29,7 +29,7 @@
         }
         
         var sideFile = new File("C:/Users/yarde/OneDrive/Desktop/Auto_Print_System/sidebar_logic.jsx");
-        var showSidebar = true;
+        var showSidebar = false;
         if (showSidebar && sideFile.exists) { 
             $.evalFile(sideFile); 
         }

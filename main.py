@@ -18,7 +18,7 @@ from typing import Dict, Any, Optional
 sys.stdout.reconfigure(encoding='utf-8')
 
 # ייבוא הפונקציות הגרפיות
-from illustrator_ops import run_jsx, open_and_color_template, place_and_simulate_print, update_size_label, delete_side_assets, save_pdf, clean_layout, apply_extra_colors
+from illustrator_ops import run_jsx, open_and_color_template, place_and_simulate_print, update_size_label, delete_side_assets, save_pdf, clean_layout, apply_extra_colors, delete_information_layer
 from vectorizer_ops import convert_to_svg
 
 # --- הגדרות ---
@@ -201,7 +201,7 @@ def vec_single(d: Dict, f: str, id: str, sec: str) -> Optional[str]:
 # -----------------------------------------------------------
 # עיבוד בודד (ללא שינוי, זה עובד טוב)
 # -----------------------------------------------------------
-def process_single_product_to_temp(order, idx, folder):
+def process_single_product_to_temp(order, idx, folder, is_wholesale=False):
     pythoncom.CoInitialize()
     doc = None
     app = None
@@ -255,6 +255,11 @@ def process_single_product_to_temp(order, idx, folder):
         if not order.get('back', {}).get('exists'): delete_side_assets(doc, app, "Print_Back", "size_Back")
         
         clean_layout(app)
+        
+        # אם זה סיטונאי, מוחקים את שכבה/קבוצה "information" מתוך "Simulation"
+        if is_wholesale:
+            print(f"   > [Product {idx+1}] מחיקת שכבה 'information'...")
+            delete_information_layer(app)
 
         out_name = f"temp_{idx}.ai"
         out_path = os.path.join(TEMP_AI_DIR, out_name)
@@ -502,6 +507,12 @@ if __name__ == "__main__":
             generated_files = []
             
             # שלב 3: עיבוד המוצרים
+            is_wholesale = full_data.get('is_wholesale', False)
+            print(f"\n{'='*50}")
+            print(f"📦 WHOLESALE MODE: {is_wholesale}")
+            if is_wholesale:
+                print(f"   → השכבה 'information' תימחק מכל המוצרים")
+            print(f"{'='*50}\n")
             for i, prod in enumerate(products):
                 for loc in ['front', 'back', 'right_sleeve', 'left_sleeve']:
                     loc_d = prod.get(loc, {})
@@ -510,7 +521,7 @@ if __name__ == "__main__":
                         path = download_image(loc_d['file_url'], f"{current_order_4}_{i}_{loc}")
                         if path: loc_d['file'] = path
                 
-                ai_file = process_single_product_to_temp(prod, i, order_folder)
+                ai_file = process_single_product_to_temp(prod, i, order_folder, is_wholesale)
                 if ai_file: 
                     generated_files.append(ai_file)
             

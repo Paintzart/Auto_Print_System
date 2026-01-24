@@ -1,13 +1,9 @@
 {
     "sidebar_path": "C:/Users/yarde/OneDrive/Desktop/Auto_Print_System/Simulations/Sidebar_Template.ai",
     "ordered_products": [
-        "Shirt"
+        "High Visibility Vest"
     ],
-    "show_sidebar": true,
-    "upsell_mode": "manual",
-    "manual_products": [
-        "Short",
-        "Hat",
-        "Canvas Bag"
-    ]
+    "show_sidebar": false,
+    "upsell_mode": "random",
+    "manual_products": []
 }

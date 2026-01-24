@@ -284,7 +284,7 @@ function runSingleSimulation(payloadForPython) {
 
 app.post('/run-simulation', async (req, res) => {
 
-    const { order_id, products, simulation_ad } = req.body;
+    const { order_id, products, simulation_ad, is_wholesale } = req.body;
 
     console.log(`\n🟣 בקשה להדמיה: הזמנה ${order_id} (${products ? products.length : 0} מוצרים)`);
 
@@ -360,7 +360,9 @@ app.post('/run-simulation', async (req, res) => {
 
             products: processedProducts, // כאן נכנסים כל המוצרים
 
-            simulation_ad: simulation_ad || { enabled: false, mode: 'random', selected_products: [] }
+            simulation_ad: simulation_ad || { enabled: false, mode: 'random', selected_products: [] },
+
+            is_wholesale: is_wholesale || false
 
         };
 

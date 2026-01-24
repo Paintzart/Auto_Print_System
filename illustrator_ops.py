@@ -9839,6 +9839,151 @@ def clean_layout(app):
 
     run_jsx(app, JSX_CLEAN_BOXES)
 
+def delete_information_layer(app):
+    """מוחק את השכבה/קבוצה 'information' מתוך 'Simulation' בכל מוצר"""
+    jsx_code = """
+    #target illustrator
+    (function() {
+        var doc = app.activeDocument;
+        var deletedCount = 0;
+        
+        // פונקציה רקורסיבית למחיקת information מתוך Simulation
+        function deleteInfoFromSimulation(container) {
+            var found = false;
+            
+            // חיפוש שכבה Simulation
+            try {
+                var simLayer = null;
+                // ניסיון למצוא Simulation כשכבה
+                try {
+                    simLayer = container.layers.getByName("Simulation");
+                } catch(e) {
+                    // אם לא נמצאה כשכבה, נחפש רקורסיבית
+                    for (var i = 0; i < container.layers.length; i++) {
+                        var result = deleteInfoFromSimulation(container.layers[i]);
+                        if (result) found = true;
+                    }
+                }
+                
+                if (simLayer) {
+                    // פתיחת נעילה של שכבה Simulation אם היא נעולה
+                    if (simLayer.locked) {
+                        simLayer.locked = false;
+                    }
+                    
+                    // ניסיון למחוק שכבה בשם "information"
+                    try {
+                        var infoLayer = simLayer.layers.getByName("information");
+                        if (infoLayer) {
+                            // פתיחת נעילה אם השכבה נעולה
+                            if (infoLayer.locked) {
+                                infoLayer.locked = false;
+                            }
+                            // פתיחת נעילה של כל תתי-השכבות
+                            for (var j = 0; j < infoLayer.layers.length; j++) {
+                                try {
+                                    if (infoLayer.layers[j].locked) {
+                                        infoLayer.layers[j].locked = false;
+                                    }
+                                } catch(e) {}
+                            }
+                            infoLayer.remove();
+                            deletedCount++;
+                            found = true;
+                        }
+                    } catch(e) {}
+                    
+                    // ניסיון למחוק קבוצה בשם "information"
+                    try {
+                        var infoGroup = simLayer.groupItems.getByName("information");
+                        if (infoGroup) {
+                            // פתיחת נעילה אם הקבוצה נעולה
+                            if (infoGroup.locked) {
+                                infoGroup.locked = false;
+                            }
+                            // פתיחת נעילה של כל הפריטים בקבוצה
+                            for (var k = 0; k < infoGroup.pageItems.length; k++) {
+                                try {
+                                    if (infoGroup.pageItems[k].locked) {
+                                        infoGroup.pageItems[k].locked = false;
+                                    }
+                                } catch(e) {}
+                            }
+                            infoGroup.remove();
+                            deletedCount++;
+                            found = true;
+                        }
+                    } catch(e) {}
+                    
+                    // חיפוש רקורסיבי בתוך תתי-שכבות (אם יש Simulation בתוך Simulation)
+                    for (var l = 0; l < simLayer.layers.length; l++) {
+                        var subResult = deleteInfoFromSimulation(simLayer.layers[l]);
+                        if (subResult) found = true;
+                    }
+                }
+            } catch(e) {}
+            
+            return found;
+        }
+        
+        try {
+            // גישה 1: חיפוש ישיר של Simulation במסמך (למוצר בודד)
+            try {
+                var directSim = doc.layers.getByName("Simulation");
+                if (directSim) {
+                    if (directSim.locked) directSim.locked = false;
+                    // ניסיון למחוק information ישירות
+                    try {
+                        var infoLayer = directSim.layers.getByName("information");
+                        if (infoLayer) {
+                            if (infoLayer.locked) infoLayer.locked = false;
+                            for (var j = 0; j < infoLayer.layers.length; j++) {
+                                try { if (infoLayer.layers[j].locked) infoLayer.layers[j].locked = false; } catch(e) {}
+                            }
+                            infoLayer.remove();
+                            deletedCount++;
+                        }
+                    } catch(e) {}
+                    try {
+                        var infoGroup = directSim.groupItems.getByName("information");
+                        if (infoGroup) {
+                            if (infoGroup.locked) infoGroup.locked = false;
+                            for (var k = 0; k < infoGroup.pageItems.length; k++) {
+                                try { if (infoGroup.pageItems[k].locked) infoGroup.pageItems[k].locked = false; } catch(e) {}
+                            }
+                            infoGroup.remove();
+                            deletedCount++;
+                        }
+                    } catch(e) {}
+                }
+            } catch(e) {}
+            
+            // גישה 2: חיפוש דרך שכבות מוצרים (1, 2, 3, 4...) - למקרה של איחוד
+            for (var i = 0; i < doc.layers.length; i++) {
+                var mainLayer = doc.layers[i];
+                var layerName = mainLayer.name;
+                
+                // בדיקה אם זו שכבה של מוצר (מספר)
+                if (/^\\d+$/.test(layerName)) {
+                    deleteInfoFromSimulation(mainLayer);
+                }
+            }
+        } catch(e) {}
+        
+        // החזרת מספר הפריטים שנמחקו (לצורך log)
+        return deletedCount;
+    })();
+    """
+    try:
+        result = app.DoJavaScript(jsx_code)
+        deleted_count = int(result) if result else 0
+        if deleted_count > 0:
+            print(f"   ✓ נמחקו {deleted_count} שכבות/קבוצות 'information'")
+        else:
+            print(f"   ⚠ לא נמצאו שכבות/קבוצות 'information' למחיקה")
+    except Exception as e:
+        print(f"   ❌ שגיאה במחיקת שכבה 'information': {e}")
+
 
 
 
