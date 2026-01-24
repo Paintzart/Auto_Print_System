@@ -6128,7 +6128,7 @@ JSX_COLOR_PROD = """
 
 
 
-function col(it, r, g, b, sr, sg, sb) {
+function col(it, r, g, b, sr, sg, sb, noStroke) {
 
 
 
@@ -6176,7 +6176,7 @@ function col(it, r, g, b, sr, sg, sb) {
 
 
 
-        it.stroked=true; it.strokeColor=s; it.strokeWidth=1; // חזרה לצבע מנוגד עבור המיתרים
+        it.stroked=true; it.strokeColor=s; it.strokeWidth=1; if(noStroke){ it.stroked=false; } // דילוג על מיתר עבור Hoodie
 
 
 
@@ -6200,7 +6200,7 @@ function col(it, r, g, b, sr, sg, sb) {
 
 
 
-            if(!p.clipping){ p.filled=true; p.fillColor=f; p.stroked=true; p.strokeColor=s; }
+            if(!p.clipping){ p.filled=true; p.fillColor=f; p.stroked=true; p.strokeColor=s; if(noStroke){ p.stroked=false; } }
 
 
 
@@ -6218,7 +6218,7 @@ function col(it, r, g, b, sr, sg, sb) {
 
 
 
-        for(var j=0; j<it.pageItems.length; j++) col(it.pageItems[j], r, g, b, sr, sg, sb);
+        for(var j=0; j<it.pageItems.length; j++) col(it.pageItems[j], r, g, b, sr, sg, sb, noStroke);
 
 
 
@@ -6300,6 +6300,11 @@ try {
 
 
 
+        var prodName = "%PROD%";
+        var isHoodie = (prodName.indexOf("Hoodie") !== -1 || prodName.indexOf("Zippered") !== -1);
+
+
+
 
 
         var hasSide1 = false; var hasSide2 = false;
@@ -6344,13 +6349,13 @@ try {
 
 
 
-            col(s1, %R1%, %G1%, %B1%, %SR1%, %SG1%, %SB1%);
+            col(s1, %R1%, %G1%, %B1%, %SR1%, %SG1%, %SB1%, isHoodie);
 
 
 
 
 
-            col(s2, %R2%, %G2%, %B2%, %SR2%, %SG2%, %SB2%);
+            col(s2, %R2%, %G2%, %B2%, %SR2%, %SG2%, %SB2%, isHoodie);
 
 
 
@@ -6362,7 +6367,7 @@ try {
 
 
 
-            col(mainGrp, %R1%, %G1%, %B1%, %SR1%, %SG1%, %SB1%);
+            col(mainGrp, %R1%, %G1%, %B1%, %SR1%, %SG1%, %SB1%, isHoodie);
 
 
 
