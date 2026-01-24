@@ -1,5 +1,4 @@
 #target illustrator
-
 // --- פונקציה לקריאת הנתונים שפייתון שולח (נתיבים ושמות קבצים) ---
 function getJobData() {
     var scriptFile = new File($.fileName);
@@ -10,21 +9,17 @@ function getJobData() {
     dataFile.close();
     return eval("(" + content + ")");
 }
-
 var job = getJobData();
 var showSidebar = job ? job.show_sidebar : true;
 var orderedProducts = job ? job.ordered_products : [];
 var upsellMode = job ? job.upsell_mode : "random";
 var manualProducts = job ? (job.manual_products || []) : [];
-
 // הגדרת משתנים דינמיים (מגיע מהקונפיג של פייתון)
 var sidebarMasterPath = job ? job.sidebar_path : "C:/Users/yarde/OneDrive/Desktop/Auto_Print_System/Simulations/Sidebar_Template.ai";
 var files = job ? job.files : [];
 var finalPath = job ? job.output : "";
-
 // --- שאר הגדרות המערכת שלך ---
 var allUpsellOptions = ["Apron", "Drawstring Bag", "Wide Brimmed Hat", "Neck Warmer", "Canvas Bag", "Polo", "Fleece1", "Beanie", "Boxers", "Short", "Hoodie", "Hat"];
-
 var allPalettes = [
     // הקיימים שלך (עם תיקוני פסיקים)
     {'name': 'Vintage Rose', 'dark': '#523245', 'medium': '#926266', 'light': '#AB7579'},
@@ -37,7 +32,6 @@ var allPalettes = [
     {'name': 'Terracotta',   'dark': '#6E2C1B', 'medium': '#A0522D', 'light': '#CD853F'},
     {'name': 'Antique Gold', 'dark': '#594D28', 'medium': '#9C8948', 'light': '#C7B370'},
     {'name': 'Sage Green',   'dark': '#3B453B', 'medium': '#6B7F6D', 'light': '#94A896'},
-
     // פסטלים וחדשים (בהירים ורכים יותר)
     {'name': 'Lavender Mist', 'dark': '#6D5D7E', 'medium': '#A194B2', 'light': '#D1C8DA'},
     {'name': 'Mint Sorbet',   'dark': '#4A6B5E', 'medium': '#87A696', 'light': '#C2D6CC'},
@@ -50,11 +44,9 @@ var allPalettes = [
     {'name': 'Warm Stone',    'dark': '#5E5A54', 'medium': '#969188', 'light': '#CDC9C2'},
     {'name': 'Lilac Dream',   'dark': '#655470', 'medium': '#9684A1', 'light': '#C8BCCC'}
 ];
-
 function recolorSidebarUI(container, palette) {
     if (!container) return;
     var allItems = container.pageItems;
-    
     for (var i = 0; i < allItems.length; i++) {
         var it = allItems[i];
         try {
@@ -74,8 +66,7 @@ function recolorSidebarUI(container, palette) {
                     else if (hS === "5D788F") it.strokeColor = hexToRgb(palette.medium);
                     else if (hS === "87A0B5") it.strokeColor = hexToRgb(palette.light);
                 }
-            } 
-            
+            }
             // 2. טיפול בטקסט (TextFrame)
             else if (it.typename === "TextFrame") {
                 var attr = it.textRange.characterAttributes;
@@ -94,7 +85,6 @@ function recolorSidebarUI(container, palette) {
                     else if (hTS === "87A0B5") attr.strokeColor = hexToRgb(palette.light);
                 }
             }
-            
             // כניסה לקבוצות
             else if (it.typename === "GroupItem") {
                 recolorSidebarUI(it, palette);
@@ -102,18 +92,15 @@ function recolorSidebarUI(container, palette) {
         } catch (e) { continue; }
     }
 }
-
 // פונקציה לבחירת מוצרים חכמה - מסננת את מה שכבר הוזמן
 function getSmartUpsellItems(allOptions, ordered) {
     var availableOptions = [];
     $.writeln("--- Smart Upsell Check ---");
     $.writeln("Ordered by customer: " + ordered.join(", "));
-    
     // מעבר על כל האופציות האפשריות לסרגל
     for (var i = 0; i < allOptions.length; i++) {
         var currentOption = allOptions[i];
         var alreadyOrdered = false;
-        
         // בדיקה האם האופציה הזו נמצאת ברשימת המוצרים שהוזמנו
         for (var j = 0; j < ordered.length; j++) {
             if (currentOption === ordered[j]) {
@@ -121,7 +108,6 @@ function getSmartUpsellItems(allOptions, ordered) {
                 break;
             }
         }
-        
         // רק אם המוצר לא הוזמן, נוסיף אותו לרשימת האפשרויות הזמינות
         if (!alreadyOrdered) {
             availableOptions.push(currentOption);
@@ -129,26 +115,21 @@ function getSmartUpsellItems(allOptions, ordered) {
             $.writeln("!!! Filtered out (already in order): " + currentOption);
         }
     }
-
     // אם הלקוח הזמין הכל ואין מספיק אופציות (פחות מ-3), נחזור לרשימה המלאה
     if (availableOptions.length < 3) {
         $.writeln("Warning: Not enough options left after filtering. Using full list.");
         availableOptions = allOptions;
     }
-
     var selected = getRandomItems(availableOptions, 3);
     $.writeln("Final selected for sidebar: " + selected.join(", "));
     $.writeln("--------------------------");
-    
     return selected;
 }
-
 function getRandomItems(arr, count) {
     var workingArr = arr.slice(0);
     var res = [];
     var i = workingArr.length;
     var t, idx;
-    
     // ערבוב (Fisher-Yates Shuffle)
     while (i--) {
         idx = Math.floor((i + 1) * Math.random());
@@ -156,31 +137,24 @@ function getRandomItems(arr, count) {
         workingArr[idx] = workingArr[i];
         workingArr[i] = t;
     }
-    
     return workingArr.slice(0, count);
 }
-
 function main() {
     app.userInteractionLevel = UserInteractionLevel.DONTDISPLAYALERTS;
     if (app.documents.length === 0) return;
-    
     // בדיקה אם בכלל צריך להוסיף תפריט צד
     if (!showSidebar) {
         $.writeln("Sidebar disabled by config.");
-        return; 
+        return;
     }
-
     var pdfDoc = app.activeDocument;
     var abRect = pdfDoc.artboards[0].artboardRect;
-
     try {
         var layer1 = pdfDoc.layers.getByName("1");
         var isDark = checkIsProductDark(layer1);
-        resizeLayer1Aggressive(pdfDoc, layer1, abRect); 
-        
+        resizeLayer1Aggressive(pdfDoc, layer1, abRect);
         var logoData = findLogoByPriority(layer1);
         if (!logoData) throw new Error("לא נמצא לוגו S_Placement בשכבה 1");
-
         // --- בחירת מוצרים חכמה ---
         var selected;
         if (upsellMode === "manual" && manualProducts.length > 0) {
@@ -191,12 +165,10 @@ function main() {
             // בחירה רנדומלית (כבר קיים)
             selected = getSmartUpsellItems(allUpsellOptions, orderedProducts);
         }
-        
         var sbDoc = app.open(new File(sidebarMasterPath));
         app.executeMenuCommand('doc-color-rgb');
         var sbLayer = sbDoc.layers.getByName("Sidebar");
         var productsLayer = sbDoc.layers.getByName("Products");
-        
         for (var p = 0; p < 3; p++) {
             var src = productsLayer.pageItems.getByName(selected[p]);
             var ph = sbLayer.pageItems.getByName("Product_" + (p + 1));
@@ -205,38 +177,31 @@ function main() {
         }
         productsLayer.remove();
         recolorSidebarUI(sbDoc, allPalettes[Math.floor(Math.random() * allPalettes.length)]);
-        
         var finalBar = sbLayer.groupItems.add();
         for (var m = sbLayer.pageItems.length - 1; m >= 1; m--) sbLayer.pageItems[m].move(finalBar, ElementPlacement.PLACEATBEGINNING);
         finalBar.selected = true; app.copy();
         sbDoc.close(SaveOptions.DONOTSAVECHANGES);
-
         // --- 5. הדבקה ב-PDF ושיבוץ לוגו ---
         pdfDoc.activate();
         var sidebarFinalLayer;
-        try { sidebarFinalLayer = pdfDoc.layers.getByName("Sidebar_Layer"); } 
+        try { sidebarFinalLayer = pdfDoc.layers.getByName("Sidebar_Layer"); }
         catch(e) { sidebarFinalLayer = pdfDoc.layers.add(); sidebarFinalLayer.name = "Sidebar_Layer"; }
-        
         pdfDoc.activeLayer = sidebarFinalLayer;
         app.paste();
         var pastedBar = app.selection[0];
         pastedBar.left = abRect[0];
         pastedBar.top = abRect[1] - (Math.abs(abRect[1] - abRect[3]) - pastedBar.height) / 2;
-
         // הכנת הלוגו לשיבוץ
         var masterLogo = pdfDoc.groupItems.add();
         for(var l=0; l<logoData.item.pageItems.length; l++) logoData.item.pageItems[l].duplicate(masterLogo, ElementPlacement.PLACEATEND);
         masterLogo.visible = false;
-
         for (var k = 0; k < pastedBar.groupItems.length; k++) {
             var prod = pastedBar.groupItems[k];
-            
             // צביעה לשחור (אם כהה) - חיפוש אגרסיבי של Simulation
             if (isDark) {
                 var prodSim = findRecursive(prod, "Simulation");
                 if (prodSim) forceColorBlackRecursive(prodSim);
             }
-
             var box = selectAndCleanupBoxes(prod, logoData.type);
             if (box) {
                 var nLogo = masterLogo.duplicate(prod, ElementPlacement.PLACEATBEGINNING);
@@ -251,68 +216,51 @@ function main() {
         masterLogo.remove();
         pastedBar.selected = true;
         app.executeMenuCommand('ungroup');
-
         // --- שמירה וסגירה אוטומטית ---
         var fileName = pdfDoc.name.split('.')[0];
         // שמירה באותה תיקייה של המקור
-        var destFile = new File(pdfDoc.path + "/" + fileName + ".jpg"); 
-        
+        var destFile = new File(pdfDoc.path + "/" + fileName + ".jpg");
         var exportOptions = new ExportOptionsJPEG();
         exportOptions.antiAliasing = true;
         exportOptions.qualitySetting = 80;
         exportOptions.artBoardClipping = true;
-
         pdfDoc.exportFile(destFile, ExportType.JPEG, exportOptions);
-        
-
-
     } catch (e) { }
 }
-
 // --- פונקציות התיקון הקריטיות ---
-
 function resizeWholeLayer1Aggressive(doc, layer, abRect) {
     var items = layer.pageItems;
     if (items.length === 0) return;
-    
     // איסוף הכל לקבוצה אחת
     var tempGrp = doc.groupItems.add();
     for (var i = items.length - 1; i >= 0; i--) {
         if (items[i] != tempGrp) items[i].move(tempGrp, ElementPlacement.PLACEATEND);
     }
-    
     // חישוב יחס הקטנה ל-23 ס"מ (651.9 נקודות)
     var targetWidth = 23 * 28.346;
     var ratio = (targetWidth / tempGrp.width) * 100;
-    
     // פקודת הקטנה ישירה
     tempGrp.resize(ratio, ratio, true, true, true, true, ratio);
-    
     // הצמדה לימין המשטח (abRect[2])
     tempGrp.left = abRect[2] - tempGrp.width;
     tempGrp.top = abRect[1] - (Math.abs(abRect[1] - abRect[3]) - tempGrp.height) / 2;
-    
     // פירוק הקבוצה חזרה לשכבה
     tempGrp.selected = true;
     app.executeMenuCommand('ungroup');
 }
-
 function forceColorBlackRecursive(container) {
     var black = new RGBColor(); black.red=0; black.green=0; black.blue=0;
     var white = new RGBColor(); white.red=255; white.green=255; white.blue=255;
-
     // מוודא שהאובייקט קיים ולא ריק
     if (!container || !container.pageItems) return;
-
     var allItems = container.pageItems;
     for (var i = 0; i < allItems.length; i++) {
         var itm = allItems[i];
-        
         try {
             // אם זו קבוצה, נצבע את התוכן שלה
             if (itm.typename === "GroupItem") {
                 forceColorBlackRecursive(itm);
-            } 
+            }
             // צביעה בטוחה של נתיבים
             else if (itm.typename === "PathItem") {
                 itm.fillColor = black;
@@ -333,7 +281,6 @@ function forceColorBlackRecursive(container) {
         }
     }
 }
-
 function checkIsProductDark(layer1) {
     var totalLum = 0;
     var count = 0;
@@ -341,7 +288,6 @@ function checkIsProductDark(layer1) {
         // מציאת הסימולציה בנתיב המדויק
         var sim = findRecursive(layer1, "Simulation");
         var model = findRecursive(sim, "Simulation") || sim;
-
         function scan(obj) {
             if (obj.typename === "PathItem" && obj.filled) {
                 var lum = getLumFromColor(obj.fillColor);
@@ -355,25 +301,18 @@ function checkIsProductDark(layer1) {
                 for (var j = 0; j < obj.pathItems.length; j++) scan(obj.pathItems[j]);
             }
         }
-        
         scan(model);
-
         if (count === 0) {
             return false;
         }
-
         var avg = totalLum / count;
         var isDark = (avg < 128);
-
-
         return isDark;
     } catch(e) {
         return false;
     }
 }
-
 // --- פונקציות תשתית (ללא שינוי) ---
-
 function findRecursive(container, name) {
     if (container.typename === "Layer") {
         try { return container.layers.getByName(name); } catch(e) {}
@@ -392,7 +331,6 @@ function findRecursive(container, name) {
     }
     return null;
 }
-
 function selectAndCleanupBoxes(prod, logoType) {
     var boxes = [];
     function scan(obj) {
@@ -409,7 +347,6 @@ function selectAndCleanupBoxes(prod, logoType) {
     }
     return selected;
 }
-
 function removeBoxesRecursive(container) {
     for (var i = container.pageItems.length - 1; i >= 0; i--) {
         var itm = container.pageItems[i];
@@ -417,7 +354,6 @@ function removeBoxesRecursive(container) {
         else if (itm.typename === "GroupItem") removeBoxesRecursive(itm);
     }
 }
-
 function findLogoByPriority(layer1) {
     var names = ["S_Placement_Front", "S_Placement_Back", "S_Placement_Left_Sleeve", "S_Placement_Right_Sleeve"];
     for (var i = 0; i < names.length; i++) {
@@ -426,25 +362,20 @@ function findLogoByPriority(layer1) {
     }
     return null;
 }
-
-
 function rgbToHex(c) {
     var r = Math.round(c.red).toString(16).toUpperCase(); if (r.length == 1) r = "0" + r;
     var g = Math.round(c.green).toString(16).toUpperCase(); if (g.length == 1) g = "0" + g;
     var b = Math.round(c.blue).toString(16).toUpperCase(); if (b.length == 1) b = "0" + b;
     return r + g + b;
 }
-
 function hexToRgb(h) {
     var s = h.replace("#",""); var c = new RGBColor();
     c.red = parseInt(s.substring(0,2), 16); c.green = parseInt(s.substring(2,4), 16); c.blue = parseInt(s.substring(4,6), 16);
     return c;
 }
-
 function resizeLayer1Aggressive(doc, mainLayer, abRect) {
     try {
         var simContainer = mainLayer.layers.getByName("Simulation");
-        
         // שלב א: הפיכת כל תתי-השכבות בתוך Simulation לקבוצות
         for (var i = simContainer.layers.length - 1; i >= 0; i--) {
             var subLayer = simContainer.layers[i];
@@ -456,27 +387,22 @@ function resizeLayer1Aggressive(doc, mainLayer, abRect) {
             }
             subLayer.remove(); // מחיקת השכבה הריקה
         }
-
         // שלב ב: איגוד כל התוכן של Simulation לקבוצה אחת לצורך הקטנה
         var items = simContainer.pageItems;
         var masterGrp = simContainer.groupItems.add();
         for (var k = items.length - 1; k >= 0; k--) {
             if (items[k] != masterGrp) items[k].move(masterGrp, ElementPlacement.PLACEATBEGINNING);
         }
-
         // שלב ג: הקטנה ל-23 ס"מ והצמדה לימין
         app.redraw();
         var targetWidth = 23 * 28.346;
         var ratio = (targetWidth / masterGrp.width) * 100;
         masterGrp.resize(ratio, ratio, true, true, true, true, ratio);
-        
         masterGrp.left = abRect[2] - masterGrp.width;
         masterGrp.top = abRect[1] - (Math.abs(abRect[1] - abRect[3]) - masterGrp.height) / 2;
-
         // פירוק קבוצת ה-Master (משאיר את תתי-הקבוצות בשם המקורי)
         masterGrp.selected = true;
         app.executeMenuCommand('ungroup');
-        
     } catch (e) {
         // אם Simulation היא קבוצה ולא שכבה
         try {
@@ -488,7 +414,6 @@ function resizeLayer1Aggressive(doc, mainLayer, abRect) {
         } catch(err) { $.writeln("Error resizing: " + err); }
     }
 }
-
 function findFlex(parent, name) {
     if (parent.layers) {
         try { return parent.layers.getByName(name); } catch(e) {}
@@ -500,7 +425,6 @@ function findFlex(parent, name) {
     }
     return null;
 }
-
 function getLumFromColor(color) {
     try {
         if (color.typename === "RGBColor") return (color.red * 0.299) + (color.green * 0.587) + (color.blue * 0.114);
@@ -514,5 +438,4 @@ function getLumFromColor(color) {
     } catch(e) {}
     return null;
 }
-
 main();

@@ -2,7 +2,6 @@
 """
 main.py - הגרסה היציבה והמלאה (ללא Threading, עם סידור דפים בטוח)
 """
-
 from __future__ import annotations
 import os
 import shutil
@@ -13,33 +12,26 @@ import win32com.client
 import pythoncom
 import requests
 from typing import Dict, Any, Optional
-
 # הגדרת קידוד
 sys.stdout.reconfigure(encoding='utf-8')
-
 # ייבוא הפונקציות הגרפיות
 from illustrator_ops import run_jsx, open_and_color_template, place_and_simulate_print, update_size_label, delete_side_assets, save_pdf, clean_layout, apply_extra_colors, delete_information_layer
 from vectorizer_ops import convert_to_svg
-
 # --- הגדרות ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-TEMP_DOWNLOAD_DIR = os.path.join(BASE_DIR, "temp_downloads") 
+TEMP_DOWNLOAD_DIR = os.path.join(BASE_DIR, "temp_downloads")
 TEMP_AI_DIR = os.path.join(BASE_DIR, "temp_ai_files")
-
 if not os.path.exists(TEMP_DOWNLOAD_DIR): os.makedirs(TEMP_DOWNLOAD_DIR)
-
 # --- קונפיגורציה ---
 try:
     with open('config.json', 'r', encoding='utf-8') as f:
         config = json.load(f)
     default_docs = os.path.join(os.path.expanduser("~"), "Documents", "Auto_Print_Output")
-    SAVE_FOLDER = config.get('save_folder_path', default_docs) 
+    SAVE_FOLDER = config.get('save_folder_path', default_docs)
 except:
     SAVE_FOLDER = os.path.join(os.path.expanduser("~"), "Documents", "Auto_Print_Output")
-
 ORDERS_ROOT_DIR = SAVE_FOLDER
 if not os.path.exists(ORDERS_ROOT_DIR): os.makedirs(ORDERS_ROOT_DIR)
-
 # --- תבניות ---
 TEMPLATES = {
     '90 Bag': os.path.join(BASE_DIR, 'Simulations', '90 Bag.ai'),
@@ -90,12 +82,10 @@ TEMPLATES = {
     'Undershirt': os.path.join(BASE_DIR, 'Simulations', 'Undershirt.ai'),
     'Mesh hat': os.path.join(BASE_DIR, 'Simulations', 'Mesh hat.ai'),
     'Combined hat': os.path.join(BASE_DIR, 'Simulations', 'Combined hat.ai'),
-    'Shirt': os.path.join(BASE_DIR, 'Simulations', 'Short.ai'), 
+    'Shirt': os.path.join(BASE_DIR, 'Simulations', 'Short.ai'),
 }
-
 API_ID = "vkd2vcts24ywdpk"
 API_SECRET = "r20rqffqdcv6vj0ahukmiu9i8ma6ur4g0e1a5o9c7vugsoracpk8"
-
 EXTENDED_COLOR_MAP = {
     'צבעוני': 'ORIGINAL', 'מקורי': 'ORIGINAL', 'ללא שינוי': 'ORIGINAL', 'צבעוני (ללא שינוי)': 'ORIGINAL',
     'שחור': '#000000', 'לבן': '#FFFFFF', 'אדום': '#cc2127', 'צהוב': '#fff200', 'כתום': '#f7941d',
@@ -116,7 +106,6 @@ EXTENDED_COLOR_MAP = {
     'ורוד פוקסיה': '#ec008c', 'סגול': '#311d72', 'סגול כהה': '#4B0082', 'חציל': '#4B0082',
     'ליילך': '#C8A2C8', 'בורדו': '#8c191f', 'יין': '#800000',
 }
-
 # -----------------------------------------------------------
 # פונקציות עזר (ללא שימוש ב-concurrent)
 # -----------------------------------------------------------
@@ -128,7 +117,6 @@ def get_contrasting_print_color(bg_hex):
         luminance = (0.299 * r + 0.587 * g + 0.114 * b)
         return '#FFFFFF' if luminance < 128 else '#000000'
     except: return '#FFFFFF'
-
 def get_hex_smart(name, return_none_on_fail=False):
     if not name or not isinstance(name, str): return None if return_none_on_fail else '#000000'
     name_clean = name.strip()
@@ -136,18 +124,15 @@ def get_hex_smart(name, return_none_on_fail=False):
     matches = difflib.get_close_matches(name_clean, EXTENDED_COLOR_MAP.keys(), n=1, cutoff=0.5)
     if matches: return EXTENDED_COLOR_MAP[matches[0]]
     return None if return_none_on_fail else '#000000'
-
 def resolve_print_color(req, shirt):
     txt = str(req).strip() if req else ""
     found = get_hex_smart(txt, True)
     if found == 'ORIGINAL': return None
     if found: return found
     return get_contrasting_print_color(shirt)
-
 def get_hex(name):
     val = get_hex_smart(name)
     return val if val != 'ORIGINAL' else None
-
 def get_unique_filename(path):
     if not os.path.exists(path): return path
     base, ext = os.path.splitext(path)
@@ -156,7 +141,6 @@ def get_unique_filename(path):
         new_path = f"{base} ({counter}){ext}"
         if not os.path.exists(new_path): return new_path
         counter += 1
-
 def download_image(url_or_base64, filename_prefix):
     try:
         if url_or_base64.startswith('data:'):
@@ -184,7 +168,6 @@ def download_image(url_or_base64, filename_prefix):
                 return path
     except: pass
     return None
-
 def vec_single(d: Dict, f: str, id: str, sec: str) -> Optional[str]:
     if not d.get('exists'): return None
     if not d.get('file') or not os.path.exists(d['file']): return None
@@ -197,7 +180,6 @@ def vec_single(d: Dict, f: str, id: str, sec: str) -> Optional[str]:
     else:
         shutil.copy(d['file'], dst)
         return convert_to_svg(dst, id, sec)
-
 # -----------------------------------------------------------
 # עיבוד בודד (ללא שינוי, זה עובד טוב)
 # -----------------------------------------------------------
@@ -210,22 +192,18 @@ def process_single_product_to_temp(order, idx, folder, is_wholesale=False):
         print(f"\n>> Processing Product {idx+1}: {prod}")
         t_path = TEMPLATES.get(prod)
         if not t_path or not os.path.exists(t_path): return None
-
         sides = ['front', 'back', 'right_sleeve', 'left_sleeve']
         svgs = {}
         # תיקון שגיאת concurrent: שימוש בלולאה רגילה
         for s in sides:
             res = vec_single(order.get(s, {}), folder, API_ID, API_SECRET)
             if res: svgs[s] = res
-
         col_raw = order.get('product_color_hebrew', "")
         parts = [p.strip() for p in col_raw.split("-")] if "-" in col_raw else [col_raw]
         h1 = get_hex_smart(parts[0])
         h2 = get_hex_smart(parts[1]) if len(parts) >= 2 else h1
         is_split = len(parts) >= 2
-        
         doc, app = open_and_color_template(t_path, h1, h2, is_split, prod)
-
         extra = order.get('extra_colors_hebrew', [])
         extra_data = []
         for name in extra:
@@ -233,7 +211,6 @@ def process_single_product_to_temp(order, idx, folder, is_wholesale=False):
             pair = [get_hex_smart(c) for c in p[:2] if get_hex_smart(c)!='ORIGINAL']
             if pair: extra_data.append(pair)
         apply_extra_colors(app, extra_data)
-
         for s in sides:
             d = order.get(s, {})
             if d.get('exists') and svgs.get(s):
@@ -242,7 +219,6 @@ def process_single_product_to_temp(order, idx, folder, is_wholesale=False):
                 cp = fc if fc!='#FFFFFF' else '#000000'
                 w = place_and_simulate_print(doc, app, svgs[s], d['prefix'], d['category'], cp, fc, is_r)
                 if w>0: update_size_label(doc, app, d['label'], w, d.get('heb',''))
-
         if not order.get('right_sleeve', {}).get('exists') and not order.get('left_sleeve', {}).get('exists'):
             delete_side_assets(doc, app, "Print_Sleeves", "size_Right_Sleeve")
             run_jsx(app, "try{app.activeDocument.textFrames.getByName('size_Left_Sleeve').remove();}catch(e){}")
@@ -250,68 +226,56 @@ def process_single_product_to_temp(order, idx, folder, is_wholesale=False):
             run_jsx(app, "try{app.activeDocument.textFrames.getByName('size_Right_Sleeve').remove();}catch(e){}")
         elif not order.get('left_sleeve', {}).get('exists'):
             run_jsx(app, "try{app.activeDocument.textFrames.getByName('size_Left_Sleeve').remove();}catch(e){}")
-        
         if not order.get('front', {}).get('exists'): delete_side_assets(doc, app, "Print_Front", "size_Front")
         if not order.get('back', {}).get('exists'): delete_side_assets(doc, app, "Print_Back", "size_Back")
-        
         clean_layout(app)
-        
         # אם זה סיטונאי, מוחקים את שכבה/קבוצה "information" מתוך "Simulation"
         if is_wholesale:
             print(f"   > [Product {idx+1}] מחיקת שכבה 'information'...")
             delete_information_layer(app)
-
         out_name = f"temp_{idx}.ai"
         out_path = os.path.join(TEMP_AI_DIR, out_name)
         doc.SaveAs(out_path)
         doc.Close(2)
         print(f"   > Saved: {out_name}")
         return out_path
-
     except Exception as e:
         print(f"Error processing {idx}: {e}")
-        if app: 
-            try: app.Quit() 
+        if app:
+            try: app.Quit()
             except: pass
         return None
     finally:
         pythoncom.CoUninitialize()
-
 # -----------------------------------------------------------
 # פונקציית האיחוד: ה-Super Script (חישוב גובה ורוחב דינמי חכם)
 # -----------------------------------------------------------
 def create_and_run_merge_script(files_list, output_pdf, order_data=None):
     pythoncom.CoInitialize()
     if not files_list: return
-    
 # חילוץ רשימת המוצרים שהוזמנו כדי למנוע כפילויות בסרגל הצד
     ordered_products = []
     if order_data and 'products' in order_data:
         # אוסף את כל ה-product_type הייחודיים מההזמנה
         ordered_products = list(set([str(p.get('product_type')) for p in order_data['products']]))
-
     # --- הדפסה ללוג לצורך בקרה (מה שביקשת) ---
     print("\n" + "="*40)
     print(f"📊 SIDEBAR DATA CONTROL:")
     print(f"🛒 Products in current order: {ordered_products}")
-    
     # בדיקה אילו מהמוצרים האלו קיימים ברשימת האופציות של הסרגל
     upsell_list = ["Apron", "Drawstring Bag", "Wide Brimmed Hat", "Neck Warmer", "Canvas Bag", "Polo", "Fleece1", "Beanie", "Boxers", "Short", "Hoodie", "Hat"]
     filtered_out = [p for p in ordered_products if p in upsell_list]
-    
     if filtered_out:
         print(f"🚫 Products to be FILTERED OUT from sidebar: {filtered_out}")
     else:
         print(f"✅ No products from the order match the sidebar options.")
     print("="*40 + "\n")
     # ------------------------------------------
-
     # קריאת נתוני simulation_ad מה-order_data
     sim_ad = order_data.get('simulation_ad', {}) or {} if order_data else {}
     show_sidebar = bool(sim_ad.get('enabled', False))
     upsell_mode = sim_ad.get('mode', 'random')
     manual_list = sim_ad.get('selected_products', [])
-    
     # הכנת אובייקט הגדרות ל-JSX
     job_config = {
         "sidebar_path": config.get('sidebar_template_path', "").replace("\\", "/"),
@@ -320,22 +284,17 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
         "upsell_mode": upsell_mode,
         "manual_products": manual_list,
     }
-    
     # כתיבת הקונפיג לקובץ JSON זמני
     with open(os.path.join(BASE_DIR, "current_job.json"), "w", encoding="utf-8") as f:
         json.dump(job_config, f, ensure_ascii=False, indent=4)    # ------------------------------------------
-
     js_files = [f.replace("\\", "/") for f in files_list]
     sidebar_logic_path = os.path.join(BASE_DIR, "sidebar_logic.jsx").replace("\\", "/")
-    
     jsx_content = f"""
     #target illustrator
     var files = {json.dumps(js_files)};
-    
     function main() {{
         if (files.length === 0) return;
         app.userInteractionLevel = UserInteractionLevel.DONTDISPLAYALERTS;
-        
         var maxWidth = 0; var maxHeight = 0;
         for (var i = 0; i < files.length; i++) {{
             var tempDoc = app.open(new File(files[i]));
@@ -344,39 +303,33 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
             if (m.height > maxHeight) maxHeight = m.height;
             tempDoc.close(SaveOptions.DONOTSAVECHANGES);
         }}
-        
-        var STEP_X = maxWidth + 150; 
+        var STEP_X = maxWidth + 150;
         var STEP_Y = maxHeight + 250;
         var COLS = 4;
-
         var masterDoc = app.open(new File(files[0]));
         organizeMasterContent(masterDoc);
-        
         for (var j = 1; j < files.length; j++) {{
             var col = j % COLS;
             var row = Math.floor(j / COLS);
             processNextFileFast(masterDoc, files[j], (j+1).toString(), col * STEP_X, -(row * STEP_Y));
         }}
-        
         var sideFile = new File("{sidebar_logic_path}");
         var showSidebar = {str(show_sidebar).lower()};
-        if (showSidebar && sideFile.exists) {{ 
-            $.evalFile(sideFile); 
+        if (showSidebar && sideFile.exists) {{
+            $.evalFile(sideFile);
         }}
         reorderArtboardsSafe(masterDoc);
     }}
-    
     // --- שאר הפונקציות (calculateLayoutMetrics, organizeMasterContent וכו') נשארות ללא שינוי ---
     function calculateLayoutMetrics(doc) {{
-        var minX = Infinity; var maxX = -Infinity; var maxY = -Infinity; var minY = Infinity;  
+        var minX = Infinity; var maxX = -Infinity; var maxY = -Infinity; var minY = Infinity;
         for (var i = 0; i < doc.artboards.length; i++) {{
-            var r = doc.artboards[i].artboardRect; 
+            var r = doc.artboards[i].artboardRect;
             if (r[0] < minX) minX = r[0]; if (r[2] > maxX) maxX = r[2];
-            if (r[1] > maxY) maxY = r[1]; if (r[3] < minY) minY = r[3]; 
+            if (r[1] > maxY) maxY = r[1]; if (r[3] < minY) minY = r[3];
         }}
         return {{ width: Math.abs(maxX - minX), height: Math.abs(maxY - minY) }};
     }}
-    
     function organizeMasterContent(doc) {{
         app.executeMenuCommand('unlockAll'); app.executeMenuCommand('showAll');
         var l1 = doc.layers.add(); l1.name = "1";
@@ -385,7 +338,6 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
             if (lay != l1) lay.move(l1, ElementPlacement.PLACEATEND);
         }}
     }}
-    
     function fastCopyLayer(srcLayer, destLayer, offX, offY) {{
         if (srcLayer.pageItems.length > 0) {{
             var tempGrp = srcLayer.groupItems.add();
@@ -414,7 +366,6 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
             fastCopyLayer(sSub, dSub, offX, offY);
         }}
     }}
-    
     function processNextFileFast(masterDoc, srcPath, layerName, offX, offY) {{
         var srcDoc = app.open(new File(srcPath));
         var abData = [];
@@ -435,7 +386,6 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
             newAb.name = "P" + layerName + "_" + d.name;
         }}
     }}
-    
     function reorderArtboardsSafe(doc) {{
         var oldAbs = [];
         for (var i = 0; i < doc.artboards.length; i++) oldAbs.push({{rect: doc.artboards[i].artboardRect, name: doc.artboards[i].name}});
@@ -446,18 +396,14 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
         var len = oldAbs.length;
         for (var k = 0; k < len; k++) doc.artboards[0].remove();
     }}
-    
     main();
     """
-    
     script_path = os.path.join(BASE_DIR, "run_merge_batch.jsx")
     with open(script_path, "w", encoding="utf-8") as f:
         f.write(jsx_content)
-        
     try:
         app = win32com.client.Dispatch("Illustrator.Application")
         app.DoJavaScriptFile(script_path)
-        
         if app.Documents.Count > 0:
             doc = app.ActiveDocument
             pdf_options = win32com.client.Dispatch("Illustrator.PDFSaveOptions")
@@ -466,33 +412,25 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
             final_path = output_pdf.replace("/", "\\")
             doc.SaveAs(final_path, pdf_options)
             doc.Close(2)
-            
     except Exception as e:
         print(f"Error during execution/save: {e}")
-        
         # --- MAIN ENTRY ---
 if __name__ == "__main__":
     if len(sys.argv) > 1:
         try:
             # טעינת הנתונים שהגיעו מהקריאה
             full_data = json.loads(sys.argv[1])
-            
             # שלב 1: חילוץ מספר הזמנה מהנתונים האמיתיים (לא משתנה קבוע)
             raw_order_id = str(full_data.get('order_id', '0000')).strip()
-            
             # לקיחת 4 ספרות אחרונות בלבד
             current_order_4 = raw_order_id[-4:]
-            
             # הדפסה לבדיקה בטרמינל (תוכלי לראות מה הוא באמת מזהה)
             print(f"DEBUG: Processing Order ID: {raw_order_id} | Final Name will be: {current_order_4}")
-            
             products = full_data.get('products', [])
-            
             # שלב 2: יצירת תיקיית פלט (לפי ה-4 ספרות)
             order_folder = os.path.join(ORDERS_ROOT_DIR, current_order_4)
-            if not os.path.exists(order_folder): 
+            if not os.path.exists(order_folder):
                 os.makedirs(order_folder)
-            
             # ניקוי ויצירה מחדש של תיקיית הקבצים הזמניים בצורה בטוחה
             if os.path.exists(TEMP_AI_DIR):
                 try:
@@ -501,11 +439,9 @@ if __name__ == "__main__":
                     time.sleep(0.5) # השהיה קלה כדי לתת למערכת ההפעלה לשחרר את התיקייה
                 except:
                     pass
-            
             # השינוי הקריטי: הוספת exist_ok=True
             os.makedirs(TEMP_AI_DIR, exist_ok=True)
             generated_files = []
-            
             # שלב 3: עיבוד המוצרים
             is_wholesale = full_data.get('is_wholesale', False)
             print(f"\n{'='*50}")
@@ -520,34 +456,23 @@ if __name__ == "__main__":
                         # שם הקובץ הזמני כולל את ה-4 ספרות
                         path = download_image(loc_d['file_url'], f"{current_order_4}_{i}_{loc}")
                         if path: loc_d['file'] = path
-                
                 ai_file = process_single_product_to_temp(prod, i, order_folder, is_wholesale)
-                if ai_file: 
+                if ai_file:
                     generated_files.append(ai_file)
-            
             # שלב 4: איחוד לקובץ PDF סופי
             if generated_files:
                 # הגדרת נתיב הקובץ הסופי
                 final_pdf = os.path.join(order_folder, f"{current_order_4}.pdf")
-
                 # אם הקובץ קיים, נוסיף מספר בסוגריים
                 counter = 1
                 while os.path.exists(final_pdf):
                     final_pdf = os.path.join(order_folder, f"{current_order_4} ({counter}).pdf")
                     counter += 1
-
                 print(f"DEBUG: Saving Final PDF to: {final_pdf}")
                 create_and_run_merge_script(generated_files, final_pdf, full_data)
             else:
                 print("No files created.")
-                
         except Exception as e:
             print(f"Error: {e}")
             import traceback
             traceback.print_exc()
-
-
-
-
-
-
