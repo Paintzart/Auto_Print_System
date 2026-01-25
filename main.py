@@ -273,9 +273,13 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
     # ------------------------------------------
     # קריאת נתוני simulation_ad מה-order_data
     sim_ad = order_data.get('simulation_ad', {}) or {} if order_data else {}
+    print(f"\n🔍 DEBUG: sim_ad = {sim_ad}")
     show_sidebar = bool(sim_ad.get('enabled', False))
     upsell_mode = sim_ad.get('mode', 'random')
     manual_list = sim_ad.get('selected_products', [])
+    print(f"🔍 DEBUG: show_sidebar = {show_sidebar}")
+    print(f"🔍 DEBUG: upsell_mode = {upsell_mode}")
+    print(f"🔍 DEBUG: manual_list = {manual_list}")
     # הכנת אובייקט הגדרות ל-JSX
     job_config = {
         "sidebar_path": config.get('sidebar_template_path', "").replace("\\", "/"),
@@ -289,6 +293,9 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
         json.dump(job_config, f, ensure_ascii=False, indent=4)    # ------------------------------------------
     js_files = [f.replace("\\", "/") for f in files_list]
     sidebar_logic_path = os.path.join(BASE_DIR, "sidebar_logic.jsx").replace("\\", "/")
+    sidebar_exists = os.path.exists(sidebar_logic_path)
+    print(f"🔍 DEBUG: sidebar_logic.jsx exists: {sidebar_exists}")
+    print(f"🔍 DEBUG: sidebar_logic.jsx path: {sidebar_logic_path}")
     jsx_content = f"""
     #target illustrator
     var files = {json.dumps(js_files)};
@@ -315,8 +322,34 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
         }}
         var sideFile = new File("{sidebar_logic_path}");
         var showSidebar = {str(show_sidebar).lower()};
+        $.writeln("=== MERGE SCRIPT: Sidebar check ===");
+        $.writeln("showSidebar: " + showSidebar);
+        $.writeln("sideFile exists: " + sideFile.exists);
+        $.writeln("masterDoc name: " + masterDoc.name);
         if (showSidebar && sideFile.exists) {{
+            $.writeln("--- Calling sidebar_logic.jsx ---");
+            // העברת masterDoc כמשתנה גלובלי ל-sidebar_logic.jsx
+            var targetDoc = masterDoc;
+            $.writeln("Activating targetDoc: " + targetDoc.name);
+            targetDoc.activate();
+            app.activeDocument = targetDoc;
+            $.writeln("Active document after activation: " + app.activeDocument.name);
+            // הגדרת משתנה גלובלי ש-sidebar_logic.jsx יוכל להשתמש בו
+            $.global.targetMasterDoc = targetDoc;
+            $.writeln("targetMasterDoc set in global");
+            $.writeln("Evaluating sidebar_logic.jsx file...");
             $.evalFile(sideFile);
+            $.writeln("sidebar_logic.jsx execution completed");
+            // וידוא ש-masterDoc נשאר פעיל אחרי הוספת התפריט הצד
+            $.writeln("Reactivating targetDoc after sidebar logic...");
+            targetDoc.activate();
+            app.activeDocument = targetDoc;
+            $.writeln("Final active document: " + app.activeDocument.name);
+            $.writeln("Document layers count: " + targetDoc.layers.length);
+            $.writeln("Document artboards count: " + targetDoc.artboards.length);
+            $.writeln("--- Sidebar logic complete ---");
+        }} else {{
+            $.writeln("Sidebar skipped (showSidebar=" + showSidebar + ", fileExists=" + sideFile.exists + ")");
         }}
         reorderArtboardsSafe(masterDoc);
     }}
@@ -402,18 +435,67 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
     with open(script_path, "w", encoding="utf-8") as f:
         f.write(jsx_content)
     try:
+        print(f"\n🔍 DEBUG: About to run merge script...")
+        print(f"🔍 DEBUG: Script path: {script_path}")
+        print(f"🔍 DEBUG: Files to merge: {files_list}")
         app = win32com.client.Dispatch("Illustrator.Application")
+        print(f"🔍 DEBUG: Illustrator app connected")
+        print(f"🔍 DEBUG: Running JavaScript file...")
         app.DoJavaScriptFile(script_path)
+        print(f"🔍 DEBUG: JavaScript file executed")
+        print(f"🔍 DEBUG: Number of open documents: {app.Documents.Count}")
         if app.Documents.Count > 0:
             doc = app.ActiveDocument
+            # וידוא שהמסמך הנכון פעיל (temp_0 - קובץ האיחוד)
+            doc_name = doc.Name
+            print(f"DEBUG: Active document before save: {doc_name}")
+            # אם יש כמה מסמכים פתוחים, נחפש את temp_0
+            if "temp_0" not in doc_name and app.Documents.Count > 1:
+                print(f"🔍 DEBUG: temp_0 not in active doc, searching...")
+                for i in range(1, app.Documents.Count + 1):
+                    try:
+                        temp_doc = app.Documents[i]
+                        print(f"🔍 DEBUG: Checking document {i}: {temp_doc.Name}")
+                        if "temp_0" in temp_doc.Name:
+                            doc = temp_doc
+                            doc.Activate()
+                            print(f"✅ DEBUG: Found and activated temp_0: {doc.Name}")
+                            break
+                    except Exception as e:
+                        print(f"⚠️ DEBUG: Error checking document {i}: {e}")
+                        continue
+            # בדיקה כמה שכבות יש במסמך (כדי לראות אם התפריט הצד נוסף)
+            try:
+                layers_count = doc.Layers.Count
+                print(f"🔍 DEBUG: Document has {layers_count} layers")
+                # בדיקה אם יש שכבה בשם Sidebar_Layer
+                has_sidebar = False
+                for i in range(1, layers_count + 1):
+                    try:
+                        layer = doc.Layers[i]
+                        if "Sidebar" in layer.Name:
+                            has_sidebar = True
+                            print(f"✅ DEBUG: Found Sidebar layer: {layer.Name}")
+                            break
+                    except:
+                        continue
+                if not has_sidebar:
+                    print(f"⚠️ WARNING: No Sidebar layer found in document!")
+            except Exception as e:
+                print(f"⚠️ DEBUG: Error checking layers: {e}")
             pdf_options = win32com.client.Dispatch("Illustrator.PDFSaveOptions")
             pdf_options.PDFPreset = "[High Quality Print]"
             pdf_options.PreserveEditability = True
             final_path = output_pdf.replace("/", "\\")
+            print(f"💾 DEBUG: Saving PDF to: {final_path}")
             doc.SaveAs(final_path, pdf_options)
+            print(f"✅ DEBUG: PDF saved successfully")
             doc.Close(2)
+            print(f"✅ DEBUG: Document closed")
     except Exception as e:
         print(f"Error during execution/save: {e}")
+        import traceback
+        traceback.print_exc()
         # --- MAIN ENTRY ---
 if __name__ == "__main__":
     if len(sys.argv) > 1:

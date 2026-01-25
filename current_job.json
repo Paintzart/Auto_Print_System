@@ -3,7 +3,7 @@
     "ordered_products": [
         "High Visibility Vest"
     ],
-    "show_sidebar": false,
+    "show_sidebar": true,
     "upsell_mode": "random",
     "manual_products": []
 }
