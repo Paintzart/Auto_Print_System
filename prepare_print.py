@@ -838,10 +838,27 @@ def run_illustrator_split(source_file_path, order_number, output_folder):
     return files_created
 def run_photoshop_processing(files_list, contract_px):
     pythoncom.CoInitialize()
-    try:
-        ps = win32com.client.Dispatch("Photoshop.Application")
-    except Exception as e:
-        print(f"Error connecting to Photoshop: {e}")
+    ps = None
+    max_attempts = 5
+    delay_seconds = 3
+    for attempt in range(1, max_attempts + 1):
+        try:
+            ps = win32com.client.Dispatch("Photoshop.Application")
+            break
+        except Exception as e:
+            if attempt < max_attempts:
+                print(f"   ניסיון {attempt}/{max_attempts}: חיבור ל-Photoshop נכשל, ממתין {delay_seconds} שניות...")
+                time.sleep(delay_seconds)
+            else:
+                print(f"Error connecting to Photoshop: {e}")
+                print("")
+                print("  טיפים:")
+                print("  • פתח את Photoshop ידנית לפני לחיצה על הכפתור (ורד/ורוד).")
+                print("  • המתן עד שהחלון של Photoshop נטען לגמרי ואז הרץ שוב.")
+                print("  • אם השגיאה חוזרת: הפעל את Select Graphic Automation Server כמנהל (Run as administrator).")
+                print("")
+                return
+    if ps is None:
         return
     for file_path in files_list:
         # וידוא שהנתיב תקין עבור ווינדוס
