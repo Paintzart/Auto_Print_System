@@ -15,7 +15,7 @@ from typing import Dict, Any, Optional
 # הגדרת קידוד
 sys.stdout.reconfigure(encoding='utf-8')
 # ייבוא הפונקציות הגרפיות
-from illustrator_ops import run_jsx, open_and_color_template, place_and_simulate_print, update_size_label, delete_side_assets, save_pdf, clean_layout, apply_extra_colors, delete_information_layer
+from illustrator_ops import run_jsx, open_and_color_template, place_and_simulate_print, update_size_label, delete_side_assets, save_pdf, clean_layout, apply_extra_colors, delete_information_layer, set_order_number_in_simulation, remove_order_number_from_simulation
 from vectorizer_ops import convert_to_svg
 # --- הגדרות ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -75,6 +75,7 @@ TEMPLATES = {
     'Softshell': os.path.join(BASE_DIR, 'Simulations', 'Softshell.ai'),
     'Short': os.path.join(BASE_DIR, 'Simulations', 'Short.ai'),
     'Triangular Bandana': os.path.join(BASE_DIR, 'Simulations', 'Triangular Bandana.ai'),
+    'Towel': os.path.join(BASE_DIR, 'Simulations', 'Towel.ai'),
     'Tactical Vest': os.path.join(BASE_DIR, 'Simulations', 'Tactical Vest.ai'),
     'Sweatpants': os.path.join(BASE_DIR, 'Simulations', 'Sweatpants.ai'),
     'Zippered Hoodie': os.path.join(BASE_DIR, 'Simulations', 'Zippered Hoodie.ai'),
@@ -118,12 +119,12 @@ def get_contrasting_print_color(bg_hex):
         return '#FFFFFF' if luminance < 128 else '#000000'
     except: return '#FFFFFF'
 def get_hex_smart(name, return_none_on_fail=False):
-    if not name or not isinstance(name, str): return None if return_none_on_fail else '#000000'
+    if not name or not isinstance(name, str): return None if return_none_on_fail else '#FFFFFF'
     name_clean = name.strip()
     if name_clean in EXTENDED_COLOR_MAP: return EXTENDED_COLOR_MAP[name_clean]
     matches = difflib.get_close_matches(name_clean, EXTENDED_COLOR_MAP.keys(), n=1, cutoff=0.5)
     if matches: return EXTENDED_COLOR_MAP[matches[0]]
-    return None if return_none_on_fail else '#000000'
+    return None if return_none_on_fail else '#FFFFFF'
 def resolve_print_color(req, shirt):
     txt = str(req).strip() if req else ""
     found = get_hex_smart(txt, True)
@@ -183,7 +184,7 @@ def vec_single(d: Dict, f: str, id: str, sec: str) -> Optional[str]:
 # -----------------------------------------------------------
 # עיבוד בודד (ללא שינוי, זה עובד טוב)
 # -----------------------------------------------------------
-def process_single_product_to_temp(order, idx, folder, is_wholesale=False):
+def process_single_product_to_temp(order, idx, folder, is_wholesale=False, order_id=None):
     pythoncom.CoInitialize()
     doc = None
     app = None
@@ -229,6 +230,11 @@ def process_single_product_to_temp(order, idx, folder, is_wholesale=False):
         if not order.get('front', {}).get('exists'): delete_side_assets(doc, app, "Print_Front", "size_Front")
         if not order.get('back', {}).get('exists'): delete_side_assets(doc, app, "Print_Back", "size_Back")
         clean_layout(app)
+        # מוסיפים מספר הזמנה ל"NumberOrder" בכל המוצרים; במוצרים 2+ מוחקים את התיבה – נשאר רק בראשון
+        if order_id:
+            set_order_number_in_simulation(app, order_id)
+            if idx >= 1:
+                remove_order_number_from_simulation(app)
         # אם זה סיטונאי, מוחקים את שכבה/קבוצה "information" מתוך "Simulation"
         if is_wholesale:
             print(f"   > [Product {idx+1}] מחיקת שכבה 'information'...")
@@ -538,7 +544,7 @@ if __name__ == "__main__":
                         # שם הקובץ הזמני כולל את ה-4 ספרות
                         path = download_image(loc_d['file_url'], f"{current_order_4}_{i}_{loc}")
                         if path: loc_d['file'] = path
-                ai_file = process_single_product_to_temp(prod, i, order_folder, is_wholesale)
+                ai_file = process_single_product_to_temp(prod, i, order_folder, is_wholesale, order_id=raw_order_id)
                 if ai_file:
                     generated_files.append(ai_file)
             # שלב 4: איחוד לקובץ PDF סופי

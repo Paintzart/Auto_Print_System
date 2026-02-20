@@ -658,6 +658,105 @@ def open_and_color_template(path: str, h1: str, h2: str, is_split: bool, prod: s
     s = s.replace('%SR2%', str(sr2)).replace('%SG2%', str(sg2)).replace('%SB2%', str(sb2))
     run_jsx(app, s)
     return doc, app
+def set_order_number_in_simulation(app, order_id: str):
+    """מעדכן או יוצר תיבת טקסט 'NumberOrder' בשכבת Simulation עם מספר ההזמנה (עמוד ראשון / מוצר 1)."""
+    if not order_id:
+        return
+    # Escape single quotes in order_id for JS string
+    safe_id = order_id.replace("\\", "\\\\").replace("'", "\\'").replace("\r", "").replace("\n", " ")
+    jsx_code = """
+    #target illustrator
+    (function() {
+        var orderId = '%ORDER_ID%';
+        var doc = app.activeDocument;
+        var simLayer = null;
+        try { simLayer = doc.layers.getByName("Simulation"); } catch(e) { return 0; }
+        if (!simLayer) return 0;
+        simLayer.visible = true;
+        simLayer.locked = false;
+        function findTextFrame(container, name) {
+            try {
+                if (container.textFrames && container.textFrames.getByName) {
+                    return container.textFrames.getByName(name);
+                }
+            } catch(e) {}
+            if (container.pageItems) {
+                for (var i = 0; i < container.pageItems.length; i++) {
+                    var it = container.pageItems[i];
+                    if (it.name === name && it.typename === "TextFrame") return it;
+                    if (it.typename === "GroupItem" && it.pageItems.length > 0) {
+                        var r = findTextFrame(it, name);
+                        if (r) return r;
+                    }
+                }
+            }
+            if (container.layers) {
+                for (var j = 0; j < container.layers.length; j++) {
+                    var r = findTextFrame(container.layers[j], name);
+                    if (r) return r;
+                }
+            }
+            return null;
+        }
+        var tf = findTextFrame(doc, "NumberOrder") || findTextFrame(simLayer, "NumberOrder");
+        if (tf) {
+            tf.contents = orderId;
+            if (tf.locked) tf.locked = false;
+            return 1;
+        }
+        var rect = simLayer.visibleBounds;
+        if (!rect || rect.length < 4) rect = [50, -50, 250, -100];
+        var top = rect[1]; var left = rect[0];
+        tf = simLayer.textFrames.add();
+        tf.name = "NumberOrder";
+        tf.contents = orderId;
+        tf.position = [left, top - 20];
+        try { tf.textRange.characterAttributes.size = 14; } catch(e) {}
+        return 1;
+    })();
+    """.replace("%ORDER_ID%", safe_id)
+    run_jsx(app, jsx_code)
+
+
+def remove_order_number_from_simulation(app):
+    """מוחק את תיבת הטקסט 'NumberOrder' משכבת Simulation (למוצרים 2 ומעלה – להשאיר מספר הזמנה רק בראשון)."""
+    jsx_code = """
+    #target illustrator
+    (function() {
+        var doc = app.activeDocument;
+        var simLayer = null;
+        try { simLayer = doc.layers.getByName("Simulation"); } catch(e) { return; }
+        if (!simLayer) return;
+        function findAndRemove(container, name) {
+            try {
+                if (container.textFrames && container.textFrames.getByName) {
+                    var tf = container.textFrames.getByName(name);
+                    if (tf) { tf.remove(); return true; }
+                }
+            } catch(e) {}
+            if (container.pageItems) {
+                for (var i = container.pageItems.length - 1; i >= 0; i--) {
+                    var it = container.pageItems[i];
+                    if (it.name === name && it.typename === "TextFrame") { it.remove(); return true; }
+                    if (it.typename === "GroupItem" && it.pageItems.length > 0) {
+                        if (findAndRemove(it, name)) return true;
+                    }
+                }
+            }
+            if (container.layers) {
+                for (var j = container.layers.length - 1; j >= 0; j--) {
+                    if (findAndRemove(container.layers[j], name)) return true;
+                }
+            }
+            return false;
+        }
+        try { doc.textFrames.getByName("NumberOrder").remove(); } catch(e) {}
+        findAndRemove(simLayer, "NumberOrder");
+    })();
+    """
+    run_jsx(app, jsx_code)
+
+
 def delete_side_assets(doc, app, ab: str, tf: str):
     run_jsx(app, JSX_DEL.replace('%AB%', ab).replace('%TF%', tf))
 def save_pdf(doc, path: str):

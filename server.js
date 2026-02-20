@@ -87,26 +87,17 @@ app.post('/prepare-print', async (req, res) => {
         if (orderPayloadPath) pythonArgs.push(orderPayloadPath);
         console.log(`   [דיבוג] מריץ פייתון עם ${pythonArgs.length} ארגומנטים`);
         const pythonProcess = spawn(PYTHON_EXE, pythonArgs, { shell: true, cwd: __dirname });
-        let stderrChunks = [];
         pythonProcess.stdout.on('data', (data) => console.log(`[Python]: ${data}`));
-        pythonProcess.stderr.on('data', (data) => {
-            stderrChunks.push(data);
-            console.error(`[Error]: ${data}`);
-        });
+        pythonProcess.stderr.on('data', (data) => console.error(`[Error]: ${data}`));
         pythonProcess.on('close', (code) => {
             try { if (fs.existsSync(localFilePath)) fs.unlinkSync(localFilePath); } catch(e) {}
             try { if (orderPayloadPath && fs.existsSync(orderPayloadPath)) fs.unlinkSync(orderPayloadPath); } catch(e) {}
             if (code === 0) res.json({ success: true, message: "הקבצים מוכנים!" });
-            else {
-                const errText = Buffer.concat(stderrChunks).toString('utf8').trim();
-                const lastLine = errText.split(/\r?\n/).filter(Boolean).pop() || errText || '';
-                console.error(`[Prepare-print] Python exited ${code}. Last stderr: ${lastLine}`);
-                res.status(500).json({ success: false, message: "עיבוד הפייתון נכשל", detail: lastLine || undefined });
-            }
+            else res.status(500).json({ success: false, message: "עיבוד הפייתון נכשל" });
         });
     } catch (error) {
         console.error("❌ שגיאה בשרת:", error.message);
-        res.status(500).json({ success: false, message: "תקלה", detail: error.message });
+        res.status(500).json({ success: false, message: "תקלה" });
     }
 });
 function saveBase64Image(base64Str, prefix) {

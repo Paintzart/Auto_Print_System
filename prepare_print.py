@@ -637,30 +637,29 @@ checkAndRecolorAllLayers();
 JSX_REMOVE_INFORMATION_FROM_SIMULATION = r"""
 #target illustrator
 function removeInformationFromSimulation() {
-    try {
-        var doc = app.activeDocument;
-        if (!doc || !doc.layers) return;
-        for (var i = 0; i < doc.layers.length; i++) {
-            var mainLayer = doc.layers[i];
-            if (!/^\d+$/.test(mainLayer.name)) continue;
+    var doc = app.activeDocument;
+    for (var i = 0; i < doc.layers.length; i++) {
+        var mainLayer = doc.layers[i];
+        if (!/^\d+$/.test(mainLayer.name)) continue;
+        try {
+            var simLayer = mainLayer.layers.getByName("Simulation");
+            simLayer.locked = false;
+            simLayer.visible = true;
+            // נסיון למחוק שכבת "information"
             try {
-                var simLayer = mainLayer.layers.getByName("Simulation");
-                simLayer.locked = false;
-                simLayer.visible = true;
+                var infoLayer = simLayer.layers.getByName("information");
+                infoLayer.locked = false;
+                infoLayer.visible = true;
+                infoLayer.remove();
+            } catch (e1) {
+                // אולי זו קבוצה (group) בשם "information"
                 try {
-                    var infoLayer = simLayer.layers.getByName("information");
-                    infoLayer.locked = false;
-                    infoLayer.visible = true;
-                    infoLayer.remove();
-                } catch (e1) {
-                    try {
-                        var infoGroup = simLayer.groupItems.getByName("information");
-                        infoGroup.remove();
-                    } catch (e2) {}
-                }
-            } catch (e) {}
-        }
-    } catch (err) {}
+                    var infoGroup = simLayer.groupItems.getByName("information");
+                    infoGroup.remove();
+                } catch (e2) {}
+            }
+        } catch (e) {}
+    }
 }
 removeInformationFromSimulation();
 """
