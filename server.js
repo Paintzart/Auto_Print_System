@@ -45,9 +45,18 @@ async function getR2SignedUrl(originalUrl) {
     }
 }
 // === כפתור ורוד ===
+// Body: orderId, fileUrl, thickness, products (מהמסך), white_print_locations (מערך מ־getWhitePrintLocations).
+// white_print_locations: רק מיקומים עם הדפס לבן, למשל [ { product: "1", location: "front" }, { product: "1", location: "left_sleeve" } ].
+// אם ריק [] – לא כותבים קובץ ולא מעבירים ארגומנט; הפייתון יריץ זיהוי אוטומטי.
 app.post('/prepare-print', async (req, res) => {
-    let { orderId, fileUrl, thickness } = req.body;
+    let { orderId, fileUrl, thickness, white_print_locations, whitePrintLocations } = req.body;
+    // תמיכה גם ב־camelCase מהקליינט
+    const listFromBody = white_print_locations ?? whitePrintLocations;
     console.log(`\n🌸 בקשה להכנת דפוס: הזמנה ${orderId}`);
+    // דיבוג: מה התקבל ב־white_print_locations
+    const hasList = listFromBody != null && Array.isArray(listFromBody) && listFromBody.length > 0;
+    console.log(`   [דיבוג] white_print_locations: ${listFromBody == null ? 'לא נשלח' : Array.isArray(listFromBody) ? `מערך באורך ${listFromBody.length}` : typeof listFromBody}`);
+    if (hasList) console.log(`   [דיבוג] תוכן:`, JSON.stringify(listFromBody));
     try {
         if (fileUrl.includes('r2.cloudflarestorage.com')) {
             fileUrl = await getR2SignedUrl(fileUrl);
@@ -65,18 +74,39 @@ app.post('/prepare-print', async (req, res) => {
             writer.on('finish', resolve);
             writer.on('error', reject);
         });
-        const pythonScriptPath = path.join(__dirname, 'prepare_print.py');
-        const pythonProcess = spawn(PYTHON_EXE, [pythonScriptPath, localFilePath, orderId, thickness], { shell: true });
+        // קובץ payload להעברת white_print_locations לפייתון (ארגומנט 5)
+        let orderPayloadPath = null;
+        if (hasList) {
+            orderPayloadPath = path.join(TEMP_DIR, `order_${orderId}_${Date.now()}_payload.json`);
+            fs.writeFileSync(orderPayloadPath, JSON.stringify({ white_print_locations: listFromBody }), 'utf8');
+            console.log(`   > רשימת הדפס לבן: ${listFromBody.length} מיקומים, קובץ: ${orderPayloadPath}`);
+        } else {
+            console.log(`   > אין רשימת הדפס לבן – יורץ זיהוי אוטומטי`);
+        }
+        const pythonArgs = [path.join(__dirname, 'prepare_print.py'), localFilePath, orderId, thickness];
+        if (orderPayloadPath) pythonArgs.push(orderPayloadPath);
+        console.log(`   [דיבוג] מריץ פייתון עם ${pythonArgs.length} ארגומנטים`);
+        const pythonProcess = spawn(PYTHON_EXE, pythonArgs, { shell: true, cwd: __dirname });
+        let stderrChunks = [];
         pythonProcess.stdout.on('data', (data) => console.log(`[Python]: ${data}`));
-        pythonProcess.stderr.on('data', (data) => console.error(`[Error]: ${data}`));
+        pythonProcess.stderr.on('data', (data) => {
+            stderrChunks.push(data);
+            console.error(`[Error]: ${data}`);
+        });
         pythonProcess.on('close', (code) => {
             try { if (fs.existsSync(localFilePath)) fs.unlinkSync(localFilePath); } catch(e) {}
+            try { if (orderPayloadPath && fs.existsSync(orderPayloadPath)) fs.unlinkSync(orderPayloadPath); } catch(e) {}
             if (code === 0) res.json({ success: true, message: "הקבצים מוכנים!" });
-            else res.status(500).json({ success: false, message: "עיבוד הפייתון נכשל" });
+            else {
+                const errText = Buffer.concat(stderrChunks).toString('utf8').trim();
+                const lastLine = errText.split(/\r?\n/).filter(Boolean).pop() || errText || '';
+                console.error(`[Prepare-print] Python exited ${code}. Last stderr: ${lastLine}`);
+                res.status(500).json({ success: false, message: "עיבוד הפייתון נכשל", detail: lastLine || undefined });
+            }
         });
     } catch (error) {
         console.error("❌ שגיאה בשרת:", error.message);
-        res.status(500).json({ success: false, message: "תקלה" });
+        res.status(500).json({ success: false, message: "תקלה", detail: error.message });
     }
 });
 function saveBase64Image(base64Str, prefix) {

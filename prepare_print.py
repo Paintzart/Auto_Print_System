@@ -147,6 +147,14 @@ def get_layer_suffix(layer_name):
         if "right" in name: return "PR"
         if "left" in name: return "PL"
     return None # אם זה לא אחד מאלה, נתעלם
+
+# מיפוי מיקום (מהשרת) לסיומת – כדי להמיר ל־layer_name מתוך job_list
+LOCATION_TO_SUFFIX = {
+    "front": "PF",         # הדפס קידמי
+    "back": "PB",          # הדפס אחורי
+    "right_sleeve": "PR",  # שרוול ימין
+    "left_sleeve": "PL",   # שרוול שמאל
+}
 def get_simulation_sublayer(print_layer_name):
     """מחזיר את שם תת-השכבה בהדמיה לפי שם שכבות ההדפסה"""
     name = print_layer_name.lower()
@@ -463,6 +471,18 @@ function getSimulationSubName(printLayerName) {
     }
     return null;
 }
+function findSimSubByName(simLayer, simSubName) {
+    var key = simSubName.toLowerCase();
+    try {
+        for (var i = 0; i < simLayer.layers.length; i++) {
+            if (simLayer.layers[i].name.toLowerCase().indexOf("front") !== -1 && key.indexOf("front") !== -1) return simLayer.layers[i];
+            if (simLayer.layers[i].name.toLowerCase().indexOf("back") !== -1 && key.indexOf("back") !== -1) return simLayer.layers[i];
+            if (simLayer.layers[i].name.toLowerCase().indexOf("right") !== -1 && key.indexOf("right") !== -1) return simLayer.layers[i];
+            if (simLayer.layers[i].name.toLowerCase().indexOf("left") !== -1 && key.indexOf("left") !== -1) return simLayer.layers[i];
+        }
+    } catch(e) {}
+    return null;
+}
 function checkDoubleCondition(doc, productIndex, printLayerName, simSubName) {
     try {
         // 1. בדיקת שכבת ההדפסה - האם היא שחורה?
@@ -496,9 +516,17 @@ function checkDoubleCondition(doc, productIndex, printLayerName, simSubName) {
         } catch(e) {
             try { simSub = simLayer.groupItems.getByName(simSubName); } catch(e) {}
         }
-        if (!simSub) return false;
-        var items = (simSub.typename === "Layer") ? simSub.pageItems : (simSub.pageItems || simSub.pathItems);
-        var isSimWhite = quickScanColor(items, true);
+        if (!simSub && simSubName) {
+            simSub = findSimSubByName(simLayer, simSubName);
+        }
+        var items;
+        if (!simSub) {
+            // fallback: אין תת-שכבות (למשל PDF) – בודקים את שכבת Simulation כולה
+            items = simLayer.pageItems || [];
+        } else {
+            items = (simSub.typename === "Layer") ? simSub.pageItems : (simSub.pageItems || simSub.pathItems || []);
+        }
+        var isSimWhite = (items.length > 0) ? quickScanColor(items, true) : false;
         return (isPrintBlack && isSimWhite);
     } catch(e) {
         return false;
@@ -539,16 +567,17 @@ function quickScanColor(items, findWhite) {
 }
 function isWhite(c) {
     if (!c) return false;
-    if (c.typename === 'CMYKColor') return c.cyan===0 && c.magenta===0 && c.yellow===0 && c.black===0;
-    if (c.typename === 'RGBColor') return c.red===255 && c.green===255 && c.blue===255;
-    if (c.typename === 'GrayColor') return c.gray===0;
+    if (c.typename === 'CMYKColor') return c.cyan <= 10 && c.magenta <= 10 && c.yellow <= 10 && c.black <= 10;
+    if (c.typename === 'RGBColor') return c.red >= 245 && c.green >= 245 && c.blue >= 245;
+    if (c.typename === 'GrayColor') return c.gray <= 10;
+    if (c.typename === 'SpotColor') return (typeof c.tint !== 'undefined' && c.tint <= 10);
     return false;
 }
 function isBlack(c) {
     if (!c) return false;
-    if (c.typename === 'CMYKColor') return c.black > 90 || (c.cyan>40 && c.black>80);
-    if (c.typename === 'RGBColor') return c.red===0 && c.green===0 && c.blue===0;
-    if (c.typename === 'GrayColor') return c.gray > 90;
+    if (c.typename === 'CMYKColor') return c.black >= 70 || (c.cyan >= 20 && c.black >= 60);
+    if (c.typename === 'RGBColor') return c.red <= 30 && c.green <= 30 && c.blue <= 30;
+    if (c.typename === 'GrayColor') return c.gray >= 70;
     return false;
 }
 function recolorLayerToWhite(doc, productIndex, printLayerName) {
@@ -604,6 +633,37 @@ function recolorItems(items, color) {
 }
 checkAndRecolorAllLayers();
 """
+# הסרת שכבה/קבוצה "information" מתוך Simulation בכל מוצר (גם אם נעולה) – להכנת קובץ הדפסה
+JSX_REMOVE_INFORMATION_FROM_SIMULATION = r"""
+#target illustrator
+function removeInformationFromSimulation() {
+    try {
+        var doc = app.activeDocument;
+        if (!doc || !doc.layers) return;
+        for (var i = 0; i < doc.layers.length; i++) {
+            var mainLayer = doc.layers[i];
+            if (!/^\d+$/.test(mainLayer.name)) continue;
+            try {
+                var simLayer = mainLayer.layers.getByName("Simulation");
+                simLayer.locked = false;
+                simLayer.visible = true;
+                try {
+                    var infoLayer = simLayer.layers.getByName("information");
+                    infoLayer.locked = false;
+                    infoLayer.visible = true;
+                    infoLayer.remove();
+                } catch (e1) {
+                    try {
+                        var infoGroup = simLayer.groupItems.getByName("information");
+                        infoGroup.remove();
+                    } catch (e2) {}
+                }
+            } catch (e) {}
+        }
+    } catch (err) {}
+}
+removeInformationFromSimulation();
+"""
 JSX_RECOLOR_WHITE = """
 #target illustrator
 function runRecolor() {
@@ -632,6 +692,50 @@ function recolorItems(items, color) {
     }
 }
 runRecolor();
+"""
+# צביעה ללבן של שכבה בודדת לפי מוצר + שם שכבה (הוראה מהשרת, בלי זיהוי אוטומטי)
+JSX_RECOLOR_ONE_LAYER_WHITE = r"""
+#target illustrator
+function runRecolorOneLayer() {
+    var productIndex = "%PROD_IDX%";
+    var printLayerName = "%LAYER_NAME%";
+    try {
+        var doc = app.activeDocument;
+        var pLayer = null;
+        try {
+            var productLayer = doc.layers.getByName(productIndex);
+            pLayer = productLayer.layers.getByName(printLayerName);
+        } catch(e) {
+            return "skip";
+        }
+        if (!pLayer || pLayer.pageItems.length === 0) return "skip";
+        if (!pLayer.visible) pLayer.visible = true;
+        var white = new CMYKColor();
+        white.cyan = 0; white.magenta = 0; white.yellow = 0; white.black = 0;
+        recolorItems(pLayer.pageItems, white);
+        return "ok";
+    } catch(e) { return "error"; }
+}
+function recolorItems(items, color) {
+    for (var i = 0; i < items.length; i++) {
+        var item = items[i];
+        if (item.typename === 'GroupItem') {
+            recolorItems(item.pageItems, color);
+        } else if (item.typename === 'PathItem' && !item.clipping) {
+            item.filled = true; item.fillColor = color; item.stroked = false;
+        } else if (item.typename === 'CompoundPathItem') {
+            for (var j = 0; j < item.pathItems.length; j++) {
+                var p = item.pathItems[j];
+                if (!p.clipping) { p.filled = true; p.fillColor = color; p.stroked = false; }
+            }
+        } else if (item.typename === 'TextFrame') {
+            if (item.textRange.characterAttributes.fillColor) {
+                item.textRange.characterAttributes.fillColor = color;
+            }
+        }
+    }
+}
+runRecolorOneLayer();
 """
 # יצירת ספוט לבן (Spot1) בפוטושופ ושמירה חסינה
 JSX_PS_TEMPLATE = r'''
@@ -707,7 +811,7 @@ main();
 # ========================================================
 # 2. פונקציות ניהול (Python)
 # ========================================================
-def run_illustrator_split(source_file_path, order_number, output_folder):
+def run_illustrator_split(source_file_path, order_number, output_folder, order_payload_path=None):
     """מבצע פיצול חכם לפי מוצרים (1, 2...) ולפי שכבות הדפסה"""
     files_created = []
     pythoncom.CoInitialize()
@@ -763,6 +867,23 @@ def run_illustrator_split(source_file_path, order_number, output_folder):
     if not job_list:
         print("No valid print jobs found (Skipped empty layers/missing artboards).")
         return []
+    # --- רשימת "הדפס לבן" מהשרת – נקרא מקובץ שהשרת שולח (order_payload_path), לא מ-config ---
+    white_print_locations = []
+    if order_payload_path and os.path.exists(order_payload_path):
+        try:
+            with open(order_payload_path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            white_print_locations = payload.get("white_print_locations") or []
+            if not isinstance(white_print_locations, list):
+                white_print_locations = []
+            print(f"   [דיבוג] נטען מ־payload: {len(white_print_locations)} מיקומים")
+        except Exception as e:
+            print(f"   [דיבוג] שגיאה בקריאת payload: {e}")
+    else:
+        if order_payload_path:
+            print(f"   [דיבוג] קובץ payload לא נמצא: {order_payload_path}")
+        else:
+            print(f"   [דיבוג] לא הועבר נתיב payload – זיהוי אוטומטי")
     # --- שלב 2: ביצוע המשימות ---
     last_4 = str(order_number)[-4:]
     for job in job_list:
@@ -781,14 +902,44 @@ def run_illustrator_split(source_file_path, order_number, output_folder):
         shutil.copyfile(source_file_path, temp_ai)
         try:
             work_doc = app.Open(temp_ai)
-            # בדיקת צבעים וצביעה לפני המחיקה (כדי שיהיו שכבות הדמיה)
-            # הסקריפט בודק את כל שכבות ההדפסה ומצבע אוטומטית את מה שצריך
+            # הסרת שכבה/קבוצה "information" מתוך Simulation בכל מוצר (גם אם נעולה)
             try:
-                print(f"   > Checking and recoloring all print layers...")
-                result_message = app.DoJavaScript(JSX_CHECK_AND_RECOLOR_ALL)
-                print(f"   > Color check completed")
-                # אפשר להדפיס את ההודעה המלאה אם רוצים:
-                # print(result_message)
+                app.DoJavaScript(JSX_REMOVE_INFORMATION_FROM_SIMULATION)
+            except Exception:
+                pass
+            # צביעה ללבן: רק אם הרשימה ריקה – זיהוי אוטומטי (שחור בהדפסה + לבן בהדמיה). אם יש רשימה – צובעים רק את מה שברשימה, בלי שום בדיקה.
+            try:
+                if white_print_locations:
+                    # רשימה מהשרת – רק מה שברשימה יצבע ללבן, בלי בדיקת צבע. שום דבר אחר לא נבדק ולא נצבע.
+                    print(f"   > Recoloring to white by server list only ({len(white_print_locations)} location(s)), no color check.")
+                    for loc in white_print_locations:
+                        prod = loc.get("product") or loc.get("prod_idx")
+                        location = loc.get("location")
+                        layer_name = loc.get("layer") or loc.get("layer_name")
+                        if not prod:
+                            continue
+                        if location is not None and location != "":
+                            suffix = LOCATION_TO_SUFFIX.get(str(location).strip().lower())
+                            if not suffix:
+                                continue
+                            layer_name = None
+                            for j in job_list:
+                                if j["prod_idx"] == str(prod) and j["suffix"] == suffix:
+                                    layer_name = j["layer_name"]
+                                    break
+                        if not layer_name:
+                            continue
+                        jsx_one = JSX_RECOLOR_ONE_LAYER_WHITE.replace("%PROD_IDX%", str(prod)).replace("%LAYER_NAME%", str(layer_name))
+                        try:
+                            app.DoJavaScript(jsx_one)
+                        except Exception:
+                            pass
+                    print(f"   > Server white-print recolor done.")
+                else:
+                    # רשימה ריקה – זיהוי אוטומטי: בודקים שחור בהדפסה + לבן בהדמיה ורק אז צובעים.
+                    print(f"   > Checking and recoloring all print layers (auto)...")
+                    result_message = app.DoJavaScript(JSX_CHECK_AND_RECOLOR_ALL)
+                    print(f"   > Color check completed")
             except Exception as e:
                 print(f"   > Error: Color detection/recoloring failed: {e}")
                 import traceback
@@ -927,6 +1078,11 @@ def create_simulation_summary_file(source_file_path, order_number, output_folder
         pass
     try:
         app.Open(source_file_path)
+        # הסרת שכבה/קבוצה "information" מתוך Simulation בכל מוצר (גם אם נעולה)
+        try:
+            app.DoJavaScript(JSX_REMOVE_INFORMATION_FROM_SIMULATION)
+        except Exception:
+            pass
         if is_only_product_1:
             # יצירת הקובץ מאפס עבור מוצר 1 בלבד
             print(f"   > Creating Print file from scratch for Product 1 only...")
@@ -951,9 +1107,13 @@ def create_simulation_summary_file(source_file_path, order_number, output_folder
 # ========================================================
 if __name__ == "__main__":
     if len(sys.argv) < 4:
-        print("Usage: script.py <input_file> <order_id> <thickness>")
+        print("Usage: script.py <input_file> <order_id> <thickness> [order_payload_path]")
         sys.exit()
     input_file, order_id, thickness = sys.argv[1], sys.argv[2], sys.argv[3]
+    order_payload_path = sys.argv[4] if len(sys.argv) > 4 else None  # קובץ JSON מהשרת עם white_print_locations
+    print(f"   [דיבוג] ארגומנטים: {len(sys.argv)}, order_payload_path={'כן: ' + order_payload_path if order_payload_path else 'לא'}")
+    if order_payload_path:
+        print(f"   [דיבוג] קובץ קיים? {os.path.exists(order_payload_path)}")
     contract_px = int(thickness.replace("px", ""))
     with open('config.json', 'r', encoding='utf-8') as f:
         config = json.load(f)
@@ -961,7 +1121,7 @@ if __name__ == "__main__":
     # יצירת תיקיית הבסיס אם היא לא קיימת (ללא תיקיית משנה לפי מספר הזמנה)
     if not os.path.exists(output_base): os.makedirs(output_base)
     print("Step 1: Illustrator Splitting...")
-    generated = run_illustrator_split(input_file, order_id, output_base)
+    generated = run_illustrator_split(input_file, order_id, output_base, order_payload_path)
     # --- התוספת החדשה: יצירת קובץ הדמיות ---
     create_simulation_summary_file(input_file, order_id, output_base)
     # ---------------------------------------
