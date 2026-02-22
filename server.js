@@ -49,10 +49,11 @@ async function getR2SignedUrl(originalUrl) {
 // white_print_locations: רק מיקומים עם הדפס לבן, למשל [ { product: "1", location: "front" }, { product: "1", location: "left_sleeve" } ].
 // אם ריק [] – לא כותבים קובץ ולא מעבירים ארגומנט; הפייתון יריץ זיהוי אוטומטי.
 app.post('/prepare-print', async (req, res) => {
-    let { orderId, fileUrl, thickness, white_print_locations, whitePrintLocations } = req.body;
+    let { orderId, fileUrl, thickness, white_print_locations, whitePrintLocations, front_print_2pocket, frontPrint2Pocket } = req.body;
     // תמיכה גם ב־camelCase מהקליינט
     const listFromBody = white_print_locations ?? whitePrintLocations;
-    console.log(`\n🌸 בקשה להכנת דפוס: הזמנה ${orderId}`);
+    const front2Pocket = front_print_2pocket ?? frontPrint2Pocket ?? false;
+    console.log(`\n🌸 בקשה להכנת דפוס: הזמנה ${orderId}${front2Pocket ? ' (הדפס קידמי 2Pocket – A4 לרוחב)' : ''}`);
     // דיבוג: מה התקבל ב־white_print_locations
     const hasList = listFromBody != null && Array.isArray(listFromBody) && listFromBody.length > 0;
     console.log(`   [דיבוג] white_print_locations: ${listFromBody == null ? 'לא נשלח' : Array.isArray(listFromBody) ? `מערך באורך ${listFromBody.length}` : typeof listFromBody}`);
@@ -74,12 +75,14 @@ app.post('/prepare-print', async (req, res) => {
             writer.on('finish', resolve);
             writer.on('error', reject);
         });
-        // קובץ payload להעברת white_print_locations לפייתון (ארגומנט 5)
+        // קובץ payload להעברת white_print_locations ו־front_print_2pocket לפייתון (ארגומנט 5)
         let orderPayloadPath = null;
-        if (hasList) {
+        const payload = { white_print_locations: hasList ? listFromBody : [], front_print_2pocket: front2Pocket };
+        if (hasList || front2Pocket) {
             orderPayloadPath = path.join(TEMP_DIR, `order_${orderId}_${Date.now()}_payload.json`);
-            fs.writeFileSync(orderPayloadPath, JSON.stringify({ white_print_locations: listFromBody }), 'utf8');
-            console.log(`   > רשימת הדפס לבן: ${listFromBody.length} מיקומים, קובץ: ${orderPayloadPath}`);
+            fs.writeFileSync(orderPayloadPath, JSON.stringify(payload), 'utf8');
+            if (hasList) console.log(`   > רשימת הדפס לבן: ${listFromBody.length} מיקומים, קובץ: ${orderPayloadPath}`);
+            if (front2Pocket) console.log(`   > הדפס קידמי 2Pocket (A4 לרוחב) – כפתור סגול`);
         } else {
             console.log(`   > אין רשימת הדפס לבן – יורץ זיהוי אוטומטי`);
         }

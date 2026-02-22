@@ -663,6 +663,46 @@ function removeInformationFromSimulation() {
 }
 removeInformationFromSimulation();
 """
+# שינוי הארטבורד ל-A4 לרוחב ומרכוז התוכן (למצב 2Pocket)
+JSX_RESIZE_ARTBOARD_A4_LANDSCAPE = r"""
+#target illustrator
+function resizeArtboardA4Landscape() {
+    var doc = app.activeDocument;
+    if (doc.artboards.length === 0) return "NO_ARTBOARD";
+    var ab = doc.artboards[0];
+    var A4_W = 841.89;
+    var A4_H = 595.28;
+    var margin = 20;
+    var abRect = ab.artboardRect;
+    var oldLeft = abRect[0], oldTop = abRect[1];
+    ab.artboardRect = [oldLeft, oldTop, oldLeft + A4_W, oldTop - A4_H];
+    var availW = A4_W - (margin * 2);
+    var availH = A4_H - (margin * 2);
+    var items = [];
+    for (var i = 0; i < doc.pageItems.length; i++) items.push(doc.pageItems[i]);
+    if (items.length === 0) return "OK";
+    var group = doc.groupItems.add();
+    group.name = "A4FitGroup";
+    for (var m = doc.pageItems.length - 1; m >= 0; m--) {
+        var item = doc.pageItems[m];
+        if (item !== group) try { item.move(group, ElementPlacement.PLACEATBEGINNING); } catch(e) {}
+    }
+    var gW = group.width;
+    var gH = group.height;
+    if (gW <= 0) gW = 1;
+    if (gH <= 0) gH = 1;
+    var scaleGX = (availW / gW) * 100;
+    var scaleGY = (availH / gH) * 100;
+    var scaleG = Math.min(scaleGX, scaleGY);
+    if (scaleG > 100) scaleG = 100;
+    group.resize(scaleG, scaleG, true, true, true, true, scaleG);
+    var newCX = oldLeft + A4_W / 2;
+    var newCY = oldTop - A4_H / 2;
+    group.position = [newCX - group.width / 2, newCY + group.height / 2];
+    return "OK";
+}
+resizeArtboardA4Landscape();
+"""
 JSX_RECOLOR_WHITE = """
 #target illustrator
 function runRecolor() {
@@ -826,6 +866,16 @@ def run_illustrator_split(source_file_path, order_number, output_folder, order_p
     except:
         print("Error opening file.")
         return []
+    # --- טעינת דגל הדפס קידמי 2Pocket (מהפיילוד) ---
+    front_print_2pocket = False
+    if order_payload_path and os.path.exists(order_payload_path):
+        try:
+            with open(order_payload_path, "r", encoding="utf-8") as f:
+                payload_pre = json.load(f)
+            front_print_2pocket = payload_pre.get("front_print_2pocket") or payload_pre.get("frontPrint2Pocket") or False
+        except Exception:
+            pass
+
     # --- שלב 1: מיפוי וסינון המשימות (Jobs) ---
     job_list = []
     for main_layer in master_doc.Layers:
@@ -840,6 +890,36 @@ def run_illustrator_split(source_file_path, order_number, output_folder, order_p
                 continue
             suffix = get_layer_suffix(sub_layer.Name)
             if not suffix:
+                continue
+            # מצב 2Pocket: רק הדפס קידמי, חיפוש ארטבורד שמכיל "2Pocket" + A4 לרוחב
+            if front_print_2pocket and suffix == "PF":
+                target_2pocket = None
+                ab_name_lower = None
+                for ab in master_doc.Artboards:
+                    ab_name_lower = ab.Name.lower()
+                    if "2pocket" not in ab_name_lower:
+                        continue
+                    if prod_idx == "1":
+                        if "p2" in ab_name_lower or "p3" in ab_name_lower:
+                            continue
+                        target_2pocket = ab.Name
+                        break
+                    if f"p{prod_idx}" in ab_name_lower or prod_idx in ab_name_lower:
+                        target_2pocket = ab.Name
+                        break
+                if not target_2pocket and prod_idx == "1":
+                    for ab in master_doc.Artboards:
+                        if "2pocket" in ab.Name.lower():
+                            target_2pocket = ab.Name
+                            break
+                if target_2pocket:
+                    job_list.append({
+                        "prod_idx": prod_idx,
+                        "layer_name": sub_layer.Name,
+                        "artboard_target": target_2pocket,
+                        "suffix": suffix,
+                        "a4_landscape": True
+                    })
                 continue
             # לוגיקת שרוולים
             base_ab_name = sub_layer.Name
@@ -971,6 +1051,13 @@ def run_illustrator_split(source_file_path, order_number, output_folder, order_p
                     if (k-1) != target_idx:
                         try: work_doc.Artboards(k).Delete()
                         except: pass
+            # מצב 2Pocket: שינוי גודל הדף ל-A4 לרוחב ומרכוז התוכן
+            if job.get("a4_landscape"):
+                try:
+                    app.DoJavaScript(JSX_RESIZE_ARTBOARD_A4_LANDSCAPE)
+                    print(f"   > A4 לרוחב (2Pocket) הוחל")
+                except Exception as e:
+                    print(f"   > אזהרה: שינוי A4 לרוחב נכשל: {e}")
             pdf_opts = win32com.client.Dispatch("Illustrator.PDFSaveOptions")
             pdf_opts = win32com.client.Dispatch("Illustrator.PDFSaveOptions")
             pdf_opts.PDFPreset = "[Press Quality]"

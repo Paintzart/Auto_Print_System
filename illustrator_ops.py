@@ -221,6 +221,7 @@ function doSmartPos(item, prefix, category) {
     if (category === "Sleeve2") suffix = "Sleeve2";
     else if (catLower.indexOf("sleeve") !== -1 || catLower.indexOf("9") !== -1 || catLower.indexOf("שרוול") !== -1) suffix = "Sleeve";
     else if (category === "Pocket") suffix = "Pocket";
+    else if (category === "2Pocket") suffix = "2Pocket";
     else if (category === "2") { suffix = "2"; } // כאן היה חסר הסוגר שגרם לשגיאה!
     else if (category === "A3") suffix = "A3";
     else if (category === "A5") suffix = "A5";
@@ -267,6 +268,7 @@ function smartPos(itemName, prefix, category, resizeArtboard, isPrint, artboardN
         if (category === "Sleeve2") suffix = "Sleeve2";
         else if (catLower.indexOf("sleeve") !== -1 || catLower.indexOf("9") !== -1 || catLower.indexOf("שרוול") !== -1) suffix = "Sleeve";
         else if (category === "Pocket") suffix = "Pocket";
+        else if (category === "2Pocket") suffix = "2Pocket";
         else if (category === "2") suffix = "2";
         else if (category === "A3") suffix = "A3";
         else if (category === "A5") suffix = "A5";
@@ -331,7 +333,10 @@ function smartPos(itemName, prefix, category, resizeArtboard, isPrint, artboardN
                 var oldRect = ab.artboardRect;
                 var newW = 595.28; // A4 width
                 var newH = 841.89; // A4 height
-                if (boxW > boxH) {
+                if (suffix === "2Pocket") {
+                    newW = 841.89;
+                    newH = 595.28;
+                } else if (boxW > boxH) {
                     newW = 841.89;
                     newH = 595.28;
                 }
@@ -585,7 +590,7 @@ def place_and_simulate_print(doc, app, path, pre, cat, p_hex, s_hex, is_raster=F
     run_jsx(app, sc)
     time.sleep(0.2)
     # 2. מיקום חכם ושינוי גודל
-    resize = "true" if cat in ["Pocket", "A4", "A5", "2"] else "false"
+    resize = "true" if cat in ["Pocket", "2Pocket", "A4", "A5", "2"] else "false"
     is_p = "true"
     ab_name = am.get(pre, "")
     sc_pos = JSX_SMART_POS.replace('%ITEM%', unique_name_print)
