@@ -178,7 +178,6 @@ function checkDoubleCondition() {
         if (!pLayer.visible) pLayer.visible = true;
         if (pLayer.pageItems.length === 0) return "false";
         var isPrintBlack = quickScanColor(pLayer.pageItems, false); // מחפש שחור
-        if (!isPrintBlack) return "false";
         // 2. בדיקת שכבת ההדמיה - האם הלוגו שם לבן?
         // שכבות ההדמיה נמצאות בתוך שכבות המוצר (1, 2, וכו')
         var simLayer = null;
@@ -194,11 +193,14 @@ function checkDoubleCondition() {
         try { simSub = simLayer.layers.getByName(simSubName); } catch(e) {
             try { simSub = simLayer.groupItems.getByName(simSubName); } catch(e) {}
         }
-        if (!simSub) return "false";
+        if (!simSub) {
+            // אין תת-שכבת הדמיה – בודקים רק לפי שחור בהדפסה
+            return isPrintBlack ? "true" : "false";
+        }
         var items = (simSub.typename === "Layer") ? simSub.pageItems : (simSub.pageItems || simSub.pathItems);
         var isSimWhite = quickScanColor(items, true); // מחפש לבן
-        // רק אם שניהם אמת - מחזירים true
-        return (isPrintBlack && isSimWhite) ? "true" : "false";
+        // רק אם אחד מהם (או שניהם) – זיהוי בהדמיה (לבן) או בקבצי הדפסה (שחור)
+        return (isPrintBlack || isSimWhite) ? "true" : "false";
     } catch(e) { return "false"; }
 }
 function quickScanColor(items, findWhite) {
@@ -500,7 +502,6 @@ function checkDoubleCondition(doc, productIndex, printLayerName, simSubName) {
         if (!pLayer || pLayer.pageItems.length === 0) return false;
         if (!pLayer.visible) pLayer.visible = true;
         var isPrintBlack = quickScanColor(pLayer.pageItems, false);
-        if (!isPrintBlack) return false;
         // 2. בדיקת שכבת ההדמיה - האם הלוגו שם לבן?
         var simLayer = null;
         try {
@@ -527,7 +528,8 @@ function checkDoubleCondition(doc, productIndex, printLayerName, simSubName) {
             items = (simSub.typename === "Layer") ? simSub.pageItems : (simSub.pageItems || simSub.pathItems || []);
         }
         var isSimWhite = (items.length > 0) ? quickScanColor(items, true) : false;
-        return (isPrintBlack && isSimWhite);
+        // זיהוי בשניהם: צובעים אם שחור בהדפסה או לבן בהדמיה (גם וגם – לא או־או)
+        return (isPrintBlack || isSimWhite);
     } catch(e) {
         return false;
     }
