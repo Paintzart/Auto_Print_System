@@ -896,24 +896,28 @@ def run_illustrator_split(source_file_path, order_number, output_folder, order_p
             # מצב 2Pocket: רק הדפס קידמי, חיפוש ארטבורד שמכיל "2Pocket" + A4 לרוחב
             if front_print_2pocket and suffix == "PF":
                 target_2pocket = None
-                ab_name_lower = None
-                for ab in master_doc.Artboards:
-                    ab_name_lower = ab.Name.lower()
-                    if "2pocket" not in ab_name_lower:
-                        continue
-                    if prod_idx == "1":
-                        if "p2" in ab_name_lower or "p3" in ab_name_lower:
+                try:
+                    for k in range(1, master_doc.Artboards.Count + 1):
+                        ab = master_doc.Artboards(k)
+                        ab_name_lower = ab.Name.lower()
+                        if "2pocket" not in ab_name_lower:
                             continue
-                        target_2pocket = ab.Name
-                        break
-                    if f"p{prod_idx}" in ab_name_lower or prod_idx in ab_name_lower:
-                        target_2pocket = ab.Name
-                        break
-                if not target_2pocket and prod_idx == "1":
-                    for ab in master_doc.Artboards:
-                        if "2pocket" in ab.Name.lower():
+                        if prod_idx == "1":
+                            if "p2" in ab_name_lower or "p3" in ab_name_lower:
+                                continue
                             target_2pocket = ab.Name
                             break
+                        if f"p{prod_idx}" in ab_name_lower or prod_idx in ab_name_lower:
+                            target_2pocket = ab.Name
+                            break
+                    if not target_2pocket and prod_idx == "1":
+                        for k in range(1, master_doc.Artboards.Count + 1):
+                            ab = master_doc.Artboards(k)
+                            if "2pocket" in ab.Name.lower():
+                                target_2pocket = ab.Name
+                                break
+                except Exception as e:
+                    print(f"   [אזהרה] שגיאה בסריקת ארטבורדים (2Pocket): {e}")
                 if target_2pocket:
                     job_list.append({
                         "prod_idx": prod_idx,
@@ -923,7 +927,7 @@ def run_illustrator_split(source_file_path, order_number, output_folder, order_p
                         "a4_landscape": True
                     })
                 continue
-            # לוגיקת שרוולים
+            # לוגיקת שרוולים (גישה לפי אינדקס – מונעת שגיאת COM "there is no document")
             base_ab_name = sub_layer.Name
             if "sleeve" in base_ab_name.lower():
                 base_ab_name = "Print_Sleeves"
@@ -931,10 +935,14 @@ def run_illustrator_split(source_file_path, order_number, output_folder, order_p
             if prod_idx != "1":
                 target_artboard = f"P{prod_idx}_{base_ab_name}"
             artboard_exists = False
-            for ab in master_doc.Artboards:
-                if target_artboard.lower() in ab.Name.lower():
-                    artboard_exists = True
-                    break
+            try:
+                for k in range(1, master_doc.Artboards.Count + 1):
+                    ab = master_doc.Artboards(k)
+                    if target_artboard.lower() in ab.Name.lower():
+                        artboard_exists = True
+                        break
+            except Exception as e:
+                print(f"   [אזהרה] שגיאה בסריקת ארטבורדים: {e}")
             if not artboard_exists:
                 print(f"Skipping - No matching artboard found for: {target_artboard}")
                 continue
@@ -948,8 +956,9 @@ def run_illustrator_split(source_file_path, order_number, output_folder, order_p
     if not job_list:
         print("No valid print jobs found (Skipped empty layers/missing artboards).")
         return []
-    # --- רשימת "הדפס לבן" מהשרת – נקרא מקובץ שהשרת שולח (order_payload_path), לא מ-config ---
+    # --- רשימת "הדפס לבן" ו־item_quantities מהשרת – נקרא מקובץ שהשרת שולח (order_payload_path) ---
     white_print_locations = []
+    quantity_map = {}  # (product, suffix) -> quantity
     if order_payload_path and os.path.exists(order_payload_path):
         try:
             with open(order_payload_path, "r", encoding="utf-8") as f:
@@ -957,7 +966,19 @@ def run_illustrator_split(source_file_path, order_number, output_folder, order_p
             white_print_locations = payload.get("white_print_locations") or []
             if not isinstance(white_print_locations, list):
                 white_print_locations = []
-            print(f"   [דיבוג] נטען מ־payload: {len(white_print_locations)} מיקומים")
+            item_quantities = payload.get("item_quantities") or []
+            if not isinstance(item_quantities, list):
+                item_quantities = []
+            # בניית מפת כמות לפי (מוצר, צד)
+            for iq in item_quantities:
+                prod = str(iq.get("product") or iq.get("prod_idx") or "")
+                loc = str(iq.get("location") or "").strip().lower()
+                qty = iq.get("quantity")
+                if prod and loc and qty is not None:
+                    suffix = LOCATION_TO_SUFFIX.get(loc)
+                    if suffix:
+                        quantity_map[(prod, suffix)] = int(qty)
+            print(f"   [דיבוג] נטען מ־payload: {len(white_print_locations)} מיקומי הדפס לבן, {len(quantity_map)} כמויות")
         except Exception as e:
             print(f"   [דיבוג] שגיאה בקריאת payload: {e}")
     else:
@@ -972,6 +993,10 @@ def run_illustrator_split(source_file_path, order_number, output_folder, order_p
         base_name = f"{last_4}_{job['suffix']}"
         if job['prod_idx'] != "1":
             base_name = f"{last_4}_{job['prod_idx']}_{job['suffix']}"
+        # הוספת כמות לשם הקובץ אם נשלחה (לפי מוצר וצד) – בסוגריים
+        qty = quantity_map.get((str(job['prod_idx']), job['suffix']))
+        if qty is not None:
+            base_name = f"{base_name}({qty})"
         final_pdf_name = f"{base_name}.pdf"
         final_pdf_path = os.path.join(output_folder, final_pdf_name)
         # === שינוי לדריסה: מחיקת קובץ קיים במקום יצירת עותק ===

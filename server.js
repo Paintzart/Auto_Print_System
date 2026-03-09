@@ -49,7 +49,7 @@ async function getR2SignedUrl(originalUrl) {
 // white_print_locations: רק מיקומים עם הדפס לבן, למשל [ { product: "1", location: "front" }, { product: "1", location: "left_sleeve" } ].
 // אם ריק [] – לא כותבים קובץ ולא מעבירים ארגומנט; הפייתון יריץ זיהוי אוטומטי.
 app.post('/prepare-print', async (req, res) => {
-    let { orderId, fileUrl, thickness, white_print_locations, whitePrintLocations, front_print_2pocket, frontPrint2Pocket } = req.body;
+    let { orderId, fileUrl, thickness, white_print_locations, whitePrintLocations, front_print_2pocket, frontPrint2Pocket, item_quantities, itemQuantities } = req.body;
     // תמיכה גם ב־camelCase מהקליינט
     const listFromBody = white_print_locations ?? whitePrintLocations;
     const front2Pocket = front_print_2pocket ?? frontPrint2Pocket ?? false;
@@ -75,14 +75,21 @@ app.post('/prepare-print', async (req, res) => {
             writer.on('finish', resolve);
             writer.on('error', reject);
         });
-        // קובץ payload להעברת white_print_locations ו־front_print_2pocket לפייתון (ארגומנט 5)
+        // קובץ payload להעברת white_print_locations, front_print_2pocket, item_quantities לפייתון (ארגומנט 5)
         let orderPayloadPath = null;
-        const payload = { white_print_locations: hasList ? listFromBody : [], front_print_2pocket: front2Pocket };
-        if (hasList || front2Pocket) {
+        const itemQtyList = item_quantities ?? itemQuantities ?? [];
+        const hasItemQty = Array.isArray(itemQtyList) && itemQtyList.length > 0;
+        const payload = {
+            white_print_locations: hasList ? listFromBody : [],
+            front_print_2pocket: front2Pocket,
+            item_quantities: hasItemQty ? itemQtyList : []
+        };
+        if (hasList || front2Pocket || hasItemQty) {
             orderPayloadPath = path.join(TEMP_DIR, `order_${orderId}_${Date.now()}_payload.json`);
             fs.writeFileSync(orderPayloadPath, JSON.stringify(payload), 'utf8');
             if (hasList) console.log(`   > רשימת הדפס לבן: ${listFromBody.length} מיקומים, קובץ: ${orderPayloadPath}`);
             if (front2Pocket) console.log(`   > הדפס קידמי 2Pocket (A4 לרוחב) – כפתור סגול`);
+            if (hasItemQty) console.log(`   > כמויות פריטים: ${itemQtyList.length} מיקומים`);
         } else {
             console.log(`   > אין רשימת הדפס לבן – יורץ זיהוי אוטומטי`);
         }
@@ -192,6 +199,43 @@ app.post('/run-simulation', async (req, res) => {
         res.status(500).json({ success: false, message: "שגיאה בעיבוד" });
     }
 });
+// === טעינת תיקיית ההדפסה מ-config (לשימוש ב-/download) ===
+function getPrintFolderPath() {
+    try {
+        const configPath = path.join(__dirname, 'config.json');
+        if (fs.existsSync(configPath)) {
+            const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+            return config.print_folder_path || config.save_folder_path || __dirname;
+        }
+    } catch (e) {}
+    return __dirname;
+}
+
+// === הורדת PDF – הממשק קורא ל־localhost:5001/download ===
+// Body: orderId או order_id (למשל S026000939). מחזיר את קובץ ה־PDF המסכם (last4_print.pdf).
+app.post('/download', (req, res) => {
+    const orderId = req.body?.orderId ?? req.body?.order_id;
+    if (!orderId) {
+        return res.status(400).json({ error: 'חסר orderId או order_id' });
+    }
+    const last4 = String(orderId).replace(/\D/g, '').slice(-4);
+    const printFolder = getPrintFolderPath();
+    const pdfName = `${last4}_print.pdf`;
+    const pdfPath = path.join(printFolder, pdfName);
+    if (!fs.existsSync(pdfPath)) {
+        return res.status(404).json({ error: 'קובץ PDF לא נמצא', path: pdfPath });
+    }
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${pdfName}"`);
+    res.sendFile(pdfPath, (err) => {
+        if (err) res.status(500).json({ error: 'שגיאה בשליחת הקובץ' });
+    });
+});
+
+const PORT_5001 = 5001;
 app.listen(PORT, () => {
     console.log(`\n✅ השרת רץ על פורט ${PORT}`);
+});
+app.listen(PORT_5001, () => {
+    console.log(`✅ השרת מאזין גם על פורט ${PORT_5001} (לממשק / הורדת PDF)`);
 });
