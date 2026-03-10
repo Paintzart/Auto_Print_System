@@ -177,8 +177,8 @@ function checkDoubleCondition() {
         var pLayer = doc.layers.getByName(printLayerName);
         if (!pLayer.visible) pLayer.visible = true;
         if (pLayer.pageItems.length === 0) return "false";
-        var isPrintBlack = quickScanColor(pLayer.pageItems, false); // מחפש שחור
-        // 2. בדיקת שכבת ההדמיה - האם הלוגו שם לבן?
+        var isPrintBlack = allItemsMatchColor(pLayer.pageItems, false); // כל הפריטים שחורים
+        // 2. בדיקת שכבת ההדמיה - האם כל הלוגו שם לבן?
         // שכבות ההדמיה נמצאות בתוך שכבות המוצר (1, 2, וכו')
         var simLayer = null;
         try {
@@ -194,60 +194,45 @@ function checkDoubleCondition() {
             try { simSub = simLayer.groupItems.getByName(simSubName); } catch(e) {}
         }
         if (!simSub) {
-            // אין תת-שכבת הדמיה – בודקים רק לפי שחור בהדפסה
-            return isPrintBlack ? "true" : "false";
+            // אין תת-שכבת הדמיה – לא ניתן לבדוק לבן, חייבים שני התנאים
+            return "false";
         }
         var items = (simSub.typename === "Layer") ? simSub.pageItems : (simSub.pageItems || simSub.pathItems);
-        var isSimWhite = quickScanColor(items, true); // מחפש לבן
-        // רק אם אחד מהם (או שניהם) – זיהוי בהדמיה (לבן) או בקבצי הדפסה (שחור)
-        return (isPrintBlack || isSimWhite) ? "true" : "false";
+        var isSimWhite = allItemsMatchColor(items, true); // כל הפריטים לבנים
+        // רק אם שניהם – שחור בהדפסה וגם לבן בהדמיה (חייבים שני התנאים)
+        return (isPrintBlack && isSimWhite) ? "true" : "false";
     } catch(e) { return "false"; }
 }
-function quickScanColor(items, findWhite) {
-    // בודק את כל הפריטים
+function getItemColor(item) {
+    if (item.typename === 'PathItem') {
+        if (item.filled) return item.fillColor;
+        if (item.stroked) return item.strokeColor;
+    } else if (item.typename === 'CompoundPathItem' && item.pathItems.length > 0) {
+        var p = item.pathItems[0];
+        return p.filled ? p.fillColor : p.strokeColor;
+    } else if (item.typename === 'TextFrame' && item.textRange.characterAttributes.fillColor) {
+        return item.textRange.characterAttributes.fillColor;
+    }
+    return null;
+}
+function allItemsMatchColor(items, findWhite) {
+    if (!items || items.length === 0) return false;
+    var foundAny = false;
     for (var i = 0; i < items.length; i++) {
         var item = items[i];
         if (item.typename === 'GroupItem') {
-            if (quickScanColor(item.pageItems, findWhite)) return true;
-        } else if (item.typename === 'PathItem') {
-            var c = null;
-            if (item.filled) c = item.fillColor;
-            else if (item.stroked) c = item.strokeColor;
+            if (!allItemsMatchColor(item.pageItems, findWhite)) return false;
+            foundAny = true;
+        } else {
+            var c = getItemColor(item);
             if (c) {
-                if (findWhite && isWhite(c)) return true;
-                if (!findWhite && isBlack(c)) return true;
+                foundAny = true;
+                if (findWhite && !isWhite(c)) return false;
+                if (!findWhite && !isBlack(c)) return false;
             }
-        } else if (item.typename === 'CompoundPathItem') {
-             if (item.pathItems.length > 0) {
-                 var p = item.pathItems[0];
-                 var c = p.filled ? p.fillColor : p.strokeColor;
-                 if (c) {
-                    if (findWhite && isWhite(c)) return true;
-                    if (!findWhite && isBlack(c)) return true;
-                 }
-             }
-        }
-        if (item.typename === 'PathItem') {
-            count++;
-            if (item.filled) c = item.fillColor;
-            else if (item.stroked) c = item.strokeColor;
-        }
-        else if (item.typename === 'CompoundPathItem') {
-             if (item.pathItems.length > 0) {
-                 var p = item.pathItems[0];
-                 var c = p.filled ? p.fillColor : p.strokeColor;
-                 if (c) {
-                    if (findWhite && isWhite(c)) return true;
-                    if (!findWhite && isBlack(c)) return true;
-                 }
-             }
-        }
-        if (c) {
-            if (findWhite && isWhite(c)) return true;
-            if (!findWhite && isBlack(c)) return true;
         }
     }
-    return false;
+    return foundAny;
 }
 function isWhite(c) {
     if (c.typename === 'CMYKColor') return c.cyan===0 && c.magenta===0 && c.yellow===0 && c.black===0;
@@ -501,8 +486,8 @@ function checkDoubleCondition(doc, productIndex, printLayerName, simSubName) {
         }
         if (!pLayer || pLayer.pageItems.length === 0) return false;
         if (!pLayer.visible) pLayer.visible = true;
-        var isPrintBlack = quickScanColor(pLayer.pageItems, false);
-        // 2. בדיקת שכבת ההדמיה - האם הלוגו שם לבן?
+        var isPrintBlack = allItemsMatchColor(pLayer.pageItems, false);
+        // 2. בדיקת שכבת ההדמיה - האם כל הלוגו שם לבן?
         var simLayer = null;
         try {
             var productLayer = doc.layers.getByName(productIndex);
@@ -527,45 +512,43 @@ function checkDoubleCondition(doc, productIndex, printLayerName, simSubName) {
         } else {
             items = (simSub.typename === "Layer") ? simSub.pageItems : (simSub.pageItems || simSub.pathItems || []);
         }
-        var isSimWhite = (items.length > 0) ? quickScanColor(items, true) : false;
-        // זיהוי בשניהם: צובעים אם שחור בהדפסה או לבן בהדמיה (גם וגם – לא או־או)
-        return (isPrintBlack || isSimWhite);
+        var isSimWhite = (items.length > 0) ? allItemsMatchColor(items, true) : false;
+        // זיהוי בשניהם: צובעים רק אם שחור בהדפסה וגם לבן בהדמיה (חייבים שני התנאים)
+        return (isPrintBlack && isSimWhite);
     } catch(e) {
         return false;
     }
 }
-function quickScanColor(items, findWhite) {
+function getItemColor(item) {
+    if (item.typename === 'PathItem') {
+        if (item.filled) return item.fillColor;
+        if (item.stroked) return item.strokeColor;
+    } else if (item.typename === 'CompoundPathItem' && item.pathItems.length > 0) {
+        var p = item.pathItems[0];
+        return p.filled ? p.fillColor : p.strokeColor;
+    } else if (item.typename === 'TextFrame' && item.textRange.characterAttributes.fillColor) {
+        return item.textRange.characterAttributes.fillColor;
+    }
+    return null;
+}
+function allItemsMatchColor(items, findWhite) {
     if (!items || items.length === 0) return false;
+    var foundAny = false;
     for (var i = 0; i < items.length; i++) {
         var item = items[i];
         if (item.typename === 'GroupItem') {
-            if (quickScanColor(item.pageItems, findWhite)) return true;
-        } else if (item.typename === 'PathItem') {
-            var c = null;
-            if (item.filled) c = item.fillColor;
-            else if (item.stroked) c = item.strokeColor;
+            if (!allItemsMatchColor(item.pageItems, findWhite)) return false;
+            foundAny = true;
+        } else {
+            var c = getItemColor(item);
             if (c) {
-                if (findWhite && isWhite(c)) return true;
-                if (!findWhite && isBlack(c)) return true;
-            }
-        } else if (item.typename === 'CompoundPathItem') {
-             if (item.pathItems.length > 0) {
-                 var p = item.pathItems[0];
-                 var c = p.filled ? p.fillColor : p.strokeColor;
-                 if (c) {
-                    if (findWhite && isWhite(c)) return true;
-                    if (!findWhite && isBlack(c)) return true;
-                 }
-             }
-        } else if (item.typename === 'TextFrame') {
-            if (item.textRange.characterAttributes.fillColor) {
-                var c = item.textRange.characterAttributes.fillColor;
-                if (findWhite && isWhite(c)) return true;
-                if (!findWhite && isBlack(c)) return true;
+                foundAny = true;
+                if (findWhite && !isWhite(c)) return false;
+                if (!findWhite && !isBlack(c)) return false;
             }
         }
     }
-    return false;
+    return foundAny;
 }
 function isWhite(c) {
     if (!c) return false;
