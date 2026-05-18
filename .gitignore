@@ -1,0 +1,23 @@
+# Python
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+
+# Node
+node_modules/
+
+# קבצים שמשתנים אוטומטית במחשב
+config.json
+current_job.json
+vector_cache.json
+script_log.txt
+temp_downloads/
+temp_ai_files/
+
+# פלט הזמנות (נתיב מקומי לכל מחשב)
+# התיקייה בפועל מוגדרת ב-config.json
+
+# תבניות Illustrator (גדולות, מעודכנות ידנית בכל מחשב)
+Simulations/
