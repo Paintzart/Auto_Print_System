@@ -7,7 +7,7 @@ import os
 import shutil
 import sys
 import json
-import base64, difflib
+import base64, difflib, re
 import win32com.client
 import pythoncom
 import requests
@@ -110,6 +110,19 @@ EXTENDED_COLOR_MAP = {
 # -----------------------------------------------------------
 # פונקציות עזר (ללא שימוש ב-concurrent)
 # -----------------------------------------------------------
+_HEX6_RE = re.compile(r'^[0-9A-Fa-f]{6}$')
+
+def try_parse_hex_color(name: str) -> Optional[str]:
+    """מחזיר #RRGGBB אם הקלט הוא בדיוק 6 תווים הקסדצימליים (אותיות גדולות/קטנות)."""
+    if not name or not isinstance(name, str):
+        return None
+    s = name.strip()
+    if s.startswith('#'):
+        s = s[1:]
+    if len(s) != 6 or not _HEX6_RE.match(s):
+        return None
+    return '#' + s.upper()
+
 def get_contrasting_print_color(bg_hex):
     if not bg_hex: return '#FFFFFF'
     h = bg_hex.lstrip('#')
@@ -121,6 +134,9 @@ def get_contrasting_print_color(bg_hex):
 def get_hex_smart(name, return_none_on_fail=False):
     if not name or not isinstance(name, str): return None if return_none_on_fail else '#FFFFFF'
     name_clean = name.strip()
+    hex_from_code = try_parse_hex_color(name_clean)
+    if hex_from_code:
+        return hex_from_code
     if name_clean in EXTENDED_COLOR_MAP: return EXTENDED_COLOR_MAP[name_clean]
     matches = difflib.get_close_matches(name_clean, EXTENDED_COLOR_MAP.keys(), n=1, cutoff=0.5)
     if matches: return EXTENDED_COLOR_MAP[matches[0]]
