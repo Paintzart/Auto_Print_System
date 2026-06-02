@@ -1,6 +1,6 @@
 
     #target illustrator
-    var files = ["C:/Users/yarde/OneDrive/Desktop/Auto_Print_System/temp_ai_files/temp_0.ai", "C:/Users/yarde/OneDrive/Desktop/Auto_Print_System/temp_ai_files/temp_1.ai", "C:/Users/yarde/OneDrive/Desktop/Auto_Print_System/temp_ai_files/temp_2.ai", "C:/Users/yarde/OneDrive/Desktop/Auto_Print_System/temp_ai_files/temp_3.ai", "C:/Users/yarde/OneDrive/Desktop/Auto_Print_System/temp_ai_files/temp_4.ai", "C:/Users/yarde/OneDrive/Desktop/Auto_Print_System/temp_ai_files/temp_5.ai", "C:/Users/yarde/OneDrive/Desktop/Auto_Print_System/temp_ai_files/temp_6.ai", "C:/Users/yarde/OneDrive/Desktop/Auto_Print_System/temp_ai_files/temp_7.ai", "C:/Users/yarde/OneDrive/Desktop/Auto_Print_System/temp_ai_files/temp_8.ai", "C:/Users/yarde/OneDrive/Desktop/Auto_Print_System/temp_ai_files/temp_9.ai", "C:/Users/yarde/OneDrive/Desktop/Auto_Print_System/temp_ai_files/temp_10.ai", "C:/Users/yarde/OneDrive/Desktop/Auto_Print_System/temp_ai_files/temp_11.ai"];
+    var files = ["C:/Users/yarde/OneDrive/Desktop/Auto_Print_System/temp_ai_files/temp_0.ai"];
     function main() {
         if (files.length === 0) return;
         app.userInteractionLevel = UserInteractionLevel.DONTDISPLAYALERTS;
@@ -23,7 +23,7 @@
             processNextFileFast(masterDoc, files[j], (j+1).toString(), col * STEP_X, -(row * STEP_Y));
         }
         var sideFile = new File("C:/Users/yarde/OneDrive/Desktop/Auto_Print_System/sidebar_logic.jsx");
-        var showSidebar = false;
+        var showSidebar = true;
         $.writeln("=== MERGE SCRIPT: Sidebar check ===");
         $.writeln("showSidebar: " + showSidebar);
         $.writeln("sideFile exists: " + sideFile.exists);

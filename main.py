@@ -47,6 +47,7 @@ TEMPLATES = {
     'Cargo Pants': os.path.join(BASE_DIR, 'Simulations', 'Cargo Pants.ai'),
     'Canvas Bag': os.path.join(BASE_DIR, 'Simulations', 'Canvas Bag.ai'),
     'Flag 80-110': os.path.join(BASE_DIR, 'Simulations', 'Flag 80-110.ai'),
+    'Flag Car': os.path.join(BASE_DIR, 'Simulations', 'Flag Car.ai'),
     'Fashion Vest': os.path.join(BASE_DIR, 'Simulations', 'Fashion Vest.ai'),
     'Drawstring Bag': os.path.join(BASE_DIR, 'Simulations', 'Drawstring Bag.ai'),
     'Fleece1': os.path.join(BASE_DIR, 'Simulations', 'Fleece1.ai'),
