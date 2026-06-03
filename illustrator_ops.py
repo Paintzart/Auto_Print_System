@@ -764,6 +764,37 @@ def remove_order_number_from_simulation(app):
 
 def delete_side_assets(doc, app, ab: str, tf: str):
     run_jsx(app, JSX_DEL.replace('%AB%', ab).replace('%TF%', tf))
+
+_PRINT_LAYER_BY_PREFIX = {
+    "F": "Print_Front",
+    "B": "Print_Back",
+    "RS": "Print_Right_Sleeve",
+    "LS": "Print_Left_Sleeve",
+}
+
+
+def delete_print_layer_only(app, prefix: str):
+    """מוחק תוכן שכבת Print + artboard — משאיר Simulation ותווית size."""
+    layer_name = _PRINT_LAYER_BY_PREFIX.get(prefix)
+    ab_name = am.get(prefix)
+    if not layer_name or not ab_name:
+        return
+    jsx = f"""
+    #target illustrator
+    (function() {{
+        try {{
+            var doc = app.activeDocument;
+            try {{
+                var layer = doc.layers.getByName("{layer_name}");
+                layer.locked = false;
+                layer.visible = true;
+                while (layer.pageItems.length > 0) layer.pageItems[0].remove();
+            }} catch(e) {{}}
+            try {{ doc.artboards.getByName("{ab_name}").remove(); }} catch(e) {{}}
+        }} catch(e) {{}}
+    }})();
+    """
+    run_jsx(app, jsx)
 def save_pdf(doc, path: str):
     try:
         o = win32com.client.Dispatch("Illustrator.PDFSaveOptions")

@@ -132,6 +132,38 @@ function saveBase64Image(base64Str, prefix) {
         return base64Str;
     }
 }
+function getReusePrintFrom(loc) {
+    if (!loc) return null;
+    return loc.reuse_print_from || loc.reusePrintFrom || null;
+}
+
+function normalizeReuseRef(reuse) {
+    if (!reuse || typeof reuse !== 'object') return null;
+    const product = reuse.product ?? reuse.prod;
+    const location = reuse.location ?? reuse.side ?? reuse.loc;
+    if (product == null || !location) return null;
+    return { product, location };
+}
+
+function mapSimulationLocation(loc) {
+    if (!loc) return { exists: false };
+    const mapped = { ...loc };
+    const reuse = normalizeReuseRef(getReusePrintFrom(loc));
+    if (reuse) {
+        mapped.reuse_print_from = reuse;
+        mapped.exists = true;
+        delete mapped.reusePrintFrom;
+    } else if (mapped.exists === undefined && mapped.file_url) {
+        mapped.exists = true;
+    }
+    return mapped;
+}
+
+function maybeSaveLocationFile(loc, prefix) {
+    if (!loc?.file_url || getReusePrintFrom(loc)) return;
+    loc.file_url = saveBase64Image(loc.file_url, prefix);
+}
+
 // === פונקציית ההרצה (הישנה והטובה) ===
 function runSingleSimulation(payloadForPython) {
     return new Promise((resolve, reject) => {
@@ -166,21 +198,21 @@ app.post('/run-simulation', async (req, res) => {
         for (let i = 0; i < products.length; i++) {
             const prod = products[i];
             console.log(`\n--- מעבד מוצר ${i + 1} ---`);
-            // שמירת תמונות כבדות (ללא שינוי)
-            if (prod.locations.front?.file_url) prod.locations.front.file_url = saveBase64Image(prod.locations.front.file_url, `front_${i}`);
-            if (prod.locations.back?.file_url) prod.locations.back.file_url = saveBase64Image(prod.locations.back.file_url, `back_${i}`);
-            if (prod.locations.right_sleeve?.file_url) prod.locations.right_sleeve.file_url = saveBase64Image(prod.locations.right_sleeve.file_url, `right_${i}`);
-            if (prod.locations.left_sleeve?.file_url) prod.locations.left_sleeve.file_url = saveBase64Image(prod.locations.left_sleeve.file_url, `left_${i}`);
+            // שמירת תמונות כבדות — לא נדרש כשיש reuse_print_from
+            maybeSaveLocationFile(prod.locations.front, `front_${i}`);
+            maybeSaveLocationFile(prod.locations.back, `back_${i}`);
+            maybeSaveLocationFile(prod.locations.right_sleeve, `right_${i}`);
+            maybeSaveLocationFile(prod.locations.left_sleeve, `left_${i}`);
             // הוספת המוצר לרשימה (במקום לשלוח לפייתון מיד!)
             processedProducts.push({
                 item_index: prod.item_index,
                 product_type: prod.product_type,
                 product_color_hebrew: prod.product_color_hebrew,
                 extra_colors_hebrew: prod.extra_colors_hebrew || [],
-                front: prod.locations.front || { exists: false },
-                back: prod.locations.back || { exists: false },
-                right_sleeve: prod.locations.right_sleeve || { exists: false },
-                left_sleeve: prod.locations.left_sleeve || { exists: false }
+                front: mapSimulationLocation(prod.locations.front),
+                back: mapSimulationLocation(prod.locations.back),
+                right_sleeve: mapSimulationLocation(prod.locations.right_sleeve),
+                left_sleeve: mapSimulationLocation(prod.locations.left_sleeve)
             });
         }
         // 2. הכנת המידע המלא לפייתון (כל המוצרים יחד)

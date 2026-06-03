@@ -15,7 +15,7 @@ from typing import Dict, Any, Optional
 # הגדרת קידוד
 sys.stdout.reconfigure(encoding='utf-8')
 # ייבוא הפונקציות הגרפיות
-from illustrator_ops import run_jsx, open_and_color_template, place_and_simulate_print, update_size_label, delete_side_assets, save_pdf, clean_layout, apply_extra_colors, delete_information_layer, set_order_number_in_simulation, remove_order_number_from_simulation
+from illustrator_ops import run_jsx, open_and_color_template, place_and_simulate_print, update_size_label, delete_side_assets, delete_print_layer_only, save_pdf, clean_layout, apply_extra_colors, delete_information_layer, set_order_number_in_simulation, remove_order_number_from_simulation
 from vectorizer_ops import convert_to_svg
 # --- הגדרות ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -198,10 +198,146 @@ def vec_single(d: Dict, f: str, id: str, sec: str) -> Optional[str]:
     else:
         shutil.copy(d['file'], dst)
         return convert_to_svg(dst, id, sec)
+
+SIDE_KEYS = ['front', 'back', 'right_sleeve', 'left_sleeve']
+SIDE_TO_PREFIX = {'front': 'F', 'back': 'B', 'right_sleeve': 'RS', 'left_sleeve': 'LS'}
+
+
+def normalize_side_name(name: str) -> Optional[str]:
+    if not name:
+        return None
+    n = str(name).strip().lower()
+    aliases = {
+        'front': 'front', 'f': 'front', 'קידמי': 'front', 'pf': 'front',
+        'back': 'back', 'b': 'back', 'אחורי': 'back', 'pb': 'back',
+        'right_sleeve': 'right_sleeve', 'rs': 'right_sleeve', 'right': 'right_sleeve',
+        'left_sleeve': 'left_sleeve', 'ls': 'left_sleeve', 'left': 'left_sleeve',
+    }
+    if n in aliases:
+        return aliases[n]
+    return n if n in SIDE_KEYS else None
+
+
+SIDE_DEFAULTS = {
+    'front': {'prefix': 'F', 'category': 'A4', 'label': 'size_Front', 'heb': 'קדמי'},
+    'back': {'prefix': 'B', 'category': 'A4', 'label': 'size_Back', 'heb': 'אחורי'},
+    'right_sleeve': {'prefix': 'RS', 'category': 'Sleeve', 'label': 'size_Right_Sleeve', 'heb': 'שרוול ימין'},
+    'left_sleeve': {'prefix': 'LS', 'category': 'Sleeve', 'label': 'size_Left_Sleeve', 'heb': 'שרוול שמאל'},
+}
+
+
+def side_is_active(loc_data: Dict[str, Any]) -> bool:
+    if not loc_data:
+        return False
+    ref = loc_data.get('reuse_print_from') or loc_data.get('reusePrintFrom')
+    if ref and isinstance(ref, dict):
+        return True
+    return bool(loc_data.get('exists'))
+
+
+def resolve_reuse_product_number(ref_product, products_all) -> int:
+    try:
+        n = int(ref_product)
+    except (TypeError, ValueError):
+        raise ValueError(f"Invalid reuse_print_from product: {ref_product}")
+    if 1 <= n <= len(products_all):
+        return n
+    for i, prod in enumerate(products_all):
+        if str(prod.get('item_index', '')).strip() == str(ref_product):
+            return i + 1
+    raise ValueError(f"reuse_print_from product {ref_product} not found in order")
+
+
+def enrich_side_data(side: str, data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    merged = dict(SIDE_DEFAULTS.get(side, {}))
+    if data:
+        merged.update({k: v for k, v in data.items() if v is not None and v != ''})
+    return merged
+
+
+def parse_reuse_print_from(loc_data: Dict[str, Any]) -> Optional[tuple[int, str]]:
+    if not loc_data:
+        return None
+    ref = loc_data.get('reuse_print_from') or loc_data.get('reusePrintFrom')
+    if not ref or not isinstance(ref, dict):
+        return None
+    src_product = ref.get('product') if ref.get('product') is not None else ref.get('prod')
+    src_location = ref.get('location') or ref.get('side') or ref.get('loc')
+    if src_product is None or not src_location:
+        return None
+    try:
+        src_product = int(src_product)
+    except (TypeError, ValueError):
+        return None
+    src_side = normalize_side_name(src_location)
+    if not src_side:
+        raise ValueError(f"Invalid reuse_print_from location: {src_location}")
+    return src_product, src_side
+
+
+def side_data_for_cache(loc_data: Dict[str, Any]) -> Dict[str, Any]:
+    skip_keys = {'file', 'file_url', 'reuse_print_from', 'reusePrintFrom'}
+    return {k: v for k, v in loc_data.items() if k not in skip_keys and not str(k).startswith('_')}
+
+
+def download_all_side_files(products, order_prefix: str) -> None:
+    """מוריד קבצים לכל המוצרים מראש — גם כשמוצר מאוחר הוא מקור ל-reuse."""
+    for i, prod in enumerate(products):
+        for loc in SIDE_KEYS:
+            loc_d = prod.get(loc, {}) or {}
+            if not side_is_active(loc_d) or parse_reuse_print_from(loc_d):
+                continue
+            if loc_d.get('file_url') and not loc_d.get('file'):
+                path = download_image(loc_d['file_url'], f"{order_prefix}_{i}_{loc}")
+                if path:
+                    loc_d['file'] = path
+
+
+def resolve_side_assets(
+    src_p: int,
+    src_s: str,
+    products_all,
+    folder: str,
+    side_cache: Dict,
+    visiting: Optional[set] = None,
+) -> Dict[str, Any]:
+    """מחזיר svg + side_data למקור — גם אם המקור מאוחר יותר ברשימה."""
+    cache_key = (src_p, src_s)
+    if cache_key in side_cache:
+        return side_cache[cache_key]
+    if visiting is None:
+        visiting = set()
+    if cache_key in visiting:
+        raise ValueError(f"Circular reuse detected at product {src_p} {src_s}")
+    visiting = visiting | {cache_key}
+
+    src_prod = products_all[src_p - 1]
+    src_loc_raw = src_prod.get(src_s, {}) or {}
+    reuse = parse_reuse_print_from(src_loc_raw)
+    if reuse:
+        chain_p = resolve_reuse_product_number(reuse[0], products_all)
+        return resolve_side_assets(chain_p, reuse[1], products_all, folder, side_cache, visiting)
+
+    src_loc = enrich_side_data(src_s, src_loc_raw)
+    if not side_is_active(src_loc):
+        raise ValueError(f"Source product {src_p} {src_s} has no print")
+    if not src_loc.get('file') or not os.path.exists(src_loc['file']):
+        raise ValueError(f"Source product {src_p} {src_s} missing file (download failed?)")
+    svg = vec_single(src_loc, folder, API_ID, API_SECRET)
+    if not svg:
+        raise ValueError(f"Source product {src_p} {src_s} vectorization failed")
+    entry = {'svg': svg, 'side_data': side_data_for_cache(src_loc)}
+    side_cache[cache_key] = entry
+    return entry
+
 # -----------------------------------------------------------
 # עיבוד בודד (ללא שינוי, זה עובד טוב)
 # -----------------------------------------------------------
-def process_single_product_to_temp(order, idx, folder, is_wholesale=False, order_id=None):
+def process_single_product_to_temp(order, idx, folder, is_wholesale=False, order_id=None, products_all=None, side_cache=None):
+    if side_cache is None:
+        side_cache = {}
+    if products_all is None:
+        products_all = [order]
     pythoncom.CoInitialize()
     doc = None
     app = None
@@ -210,12 +346,39 @@ def process_single_product_to_temp(order, idx, folder, is_wholesale=False, order
         print(f"\n>> Processing Product {idx+1}: {prod}")
         t_path = TEMPLATES.get(prod)
         if not t_path or not os.path.exists(t_path): return None
-        sides = ['front', 'back', 'right_sleeve', 'left_sleeve']
+        sides = SIDE_KEYS
         svgs = {}
-        # תיקון שגיאת concurrent: שימוש בלולאה רגילה
+        original_sides = {s: dict(order.get(s, {}) or {}) for s in sides}
         for s in sides:
-            res = vec_single(order.get(s, {}), folder, API_ID, API_SECRET)
-            if res: svgs[s] = res
+            loc = original_sides[s]
+            if not side_is_active(loc):
+                continue
+            reuse_ref = parse_reuse_print_from(loc)
+            if reuse_ref:
+                ref_product, src_s = reuse_ref
+                src_p = resolve_reuse_product_number(ref_product, products_all)
+                if src_p < 1 or src_p > len(products_all):
+                    raise ValueError(f"Product {idx+1} {s}: reuse_print_from product {src_p} out of range")
+                if src_p - 1 == idx and src_s == s:
+                    raise ValueError(f"Product {idx+1} {s}: cannot reuse from itself")
+                cached = resolve_side_assets(src_p, src_s, products_all, folder, side_cache)
+                svgs[s] = cached['svg']
+                order[s] = {
+                    **enrich_side_data(src_s, cached['side_data']),
+                    'exists': True,
+                    '_skip_print_layer': True,
+                }
+                print(f"   > [Product {idx+1}] {s}: reuse print from product {src_p} {src_s} (simulation only)")
+                continue
+            loc = enrich_side_data(s, loc)
+            order[s] = loc
+            own_key = (idx + 1, s)
+            if own_key in side_cache:
+                svgs[s] = side_cache[own_key]['svg']
+            else:
+                res = vec_single(loc, folder, API_ID, API_SECRET)
+                if res:
+                    svgs[s] = res
         col_raw = order.get('product_color_hebrew', "")
         parts = [p.strip() for p in col_raw.split("-")] if "-" in col_raw else [col_raw]
         h1 = get_hex_smart(parts[0])
@@ -230,22 +393,42 @@ def process_single_product_to_temp(order, idx, folder, is_wholesale=False, order
             if pair: extra_data.append(pair)
         apply_extra_colors(app, extra_data)
         for s in sides:
-            d = order.get(s, {})
-            if d.get('exists') and svgs.get(s):
-                is_r = d.get('no_vectorization', False)
-                fc = resolve_print_color(d.get('req_color_hebrew'), h1)
-                cp = fc if fc!='#FFFFFF' else '#000000'
-                w = place_and_simulate_print(doc, app, svgs[s], d['prefix'], d['category'], cp, fc, is_r)
-                if w>0: update_size_label(doc, app, d['label'], w, d.get('heb',''))
-        if not order.get('right_sleeve', {}).get('exists') and not order.get('left_sleeve', {}).get('exists'):
+            d = enrich_side_data(s, order.get(s, {}) or {})
+            if not side_is_active(d) or not svgs.get(s):
+                continue
+            is_r = d.get('no_vectorization', False)
+            fc = resolve_print_color(d.get('req_color_hebrew'), h1)
+            cp = fc if fc!='#FFFFFF' else '#000000'
+            prefix = d.get('prefix') or SIDE_TO_PREFIX.get(s, 'F')
+            w = place_and_simulate_print(doc, app, svgs[s], prefix, d.get('category', 'A4'), cp, fc, is_r)
+            label = d.get('label') or SIDE_DEFAULTS.get(s, {}).get('label', f'size_{s}')
+            heb = d.get('heb') or SIDE_DEFAULTS.get(s, {}).get('heb', '')
+            if w>0: update_size_label(doc, app, label, w, heb)
+            if d.get('_skip_print_layer'):
+                delete_print_layer_only(app, prefix)
+                print(f"   > [Product {idx+1}] {s}: removed Print layer (reuse)")
+            orig = enrich_side_data(s, original_sides[s])
+            reuse_from = parse_reuse_print_from(orig)
+            if not reuse_from:
+                side_cache[(idx + 1, s)] = {
+                    'svg': svgs[s],
+                    'side_data': side_data_for_cache(orig),
+                }
+            else:
+                src_p = resolve_reuse_product_number(reuse_from[0], products_all)
+                src_s = reuse_from[1]
+                side_cache[(idx + 1, s)] = side_cache[(src_p, src_s)]
+        rs_active = side_is_active(order.get('right_sleeve', {}))
+        ls_active = side_is_active(order.get('left_sleeve', {}))
+        if not rs_active and not ls_active:
             delete_side_assets(doc, app, "Print_Sleeves", "size_Right_Sleeve")
             run_jsx(app, "try{app.activeDocument.textFrames.getByName('size_Left_Sleeve').remove();}catch(e){}")
-        elif not order.get('right_sleeve', {}).get('exists'):
+        elif not rs_active:
             run_jsx(app, "try{app.activeDocument.textFrames.getByName('size_Right_Sleeve').remove();}catch(e){}")
-        elif not order.get('left_sleeve', {}).get('exists'):
+        elif not ls_active:
             run_jsx(app, "try{app.activeDocument.textFrames.getByName('size_Left_Sleeve').remove();}catch(e){}")
-        if not order.get('front', {}).get('exists'): delete_side_assets(doc, app, "Print_Front", "size_Front")
-        if not order.get('back', {}).get('exists'): delete_side_assets(doc, app, "Print_Back", "size_Back")
+        if not side_is_active(order.get('front', {})): delete_side_assets(doc, app, "Print_Front", "size_Front")
+        if not side_is_active(order.get('back', {})): delete_side_assets(doc, app, "Print_Back", "size_Back")
         clean_layout(app)
         # מוסיפים מספר הזמנה ל"NumberOrder" בכל המוצרים; במוצרים 2+ מוחקים את התיבה – נשאר רק בראשון
         if order_id:
@@ -263,10 +446,14 @@ def process_single_product_to_temp(order, idx, folder, is_wholesale=False, order
         print(f"   > Saved: {out_name}")
         return out_path
     except Exception as e:
-        print(f"Error processing {idx}: {e}")
-        if app:
-            try: app.Quit()
-            except: pass
+        print(f"Error processing product {idx+1}: {e}")
+        import traceback
+        traceback.print_exc()
+        if doc:
+            try:
+                doc.Close(2)
+            except Exception:
+                pass
         return None
     finally:
         pythoncom.CoUninitialize()
@@ -554,16 +741,18 @@ if __name__ == "__main__":
             if is_wholesale:
                 print(f"   → השכבה 'information' תימחק מכל המוצרים")
             print(f"{'='*50}\n")
+            side_cache = {}
+            download_all_side_files(products, current_order_4)
             for i, prod in enumerate(products):
-                for loc in ['front', 'back', 'right_sleeve', 'left_sleeve']:
-                    loc_d = prod.get(loc, {})
-                    if loc_d.get('exists') and loc_d.get('file_url'):
-                        # שם הקובץ הזמני כולל את ה-4 ספרות
-                        path = download_image(loc_d['file_url'], f"{current_order_4}_{i}_{loc}")
-                        if path: loc_d['file'] = path
-                ai_file = process_single_product_to_temp(prod, i, order_folder, is_wholesale, order_id=raw_order_id)
+                ai_file = process_single_product_to_temp(
+                    prod, i, order_folder, is_wholesale,
+                    order_id=raw_order_id, products_all=products, side_cache=side_cache
+                )
                 if ai_file:
                     generated_files.append(ai_file)
+                else:
+                    print(f"⚠️ Product {i+1} skipped – not included in merge")
+            print(f"\n📊 Merge input: {len(generated_files)}/{len(products)} products")
             # שלב 4: איחוד לקובץ PDF סופי
             if generated_files:
                 # הגדרת נתיב הקובץ הסופי
