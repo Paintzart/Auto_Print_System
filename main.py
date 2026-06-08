@@ -102,7 +102,7 @@ EXTENDED_COLOR_MAP = {
     'כחול': '#0000FF', 'נייבי': '#0e2d4e', 'כחול נייבי': '#0e2d4e', 'ניבי': '#0e2d4e',
     'רויאל': '#1d4483', 'כחול רויאל': '#1d4483', 'תכלת': '#58b7de', 'טורקיז': '#029faa',
     'ים': '#40E0D0', 'פטרול': '#005f6a',
-    'ירוק': '#8dc63f', 'ירוק בקבוק': '#064422', 'בקבוק': '#064422', 'ירוק תפוח': '#8DB600',
+    'ירוק': '#8dc63f', 'ירוק בקבוק': '#033A1E', 'בקבוק': '#033A1E', 'ירוק תפוח': '#8DB600',
     'תפוח': '#8DB600', 'זיית': '#4f4e20', 'זית': '#4f4e20', 'ירוק זית': '#4f4e20', 'מנטה': '#98FF98',
     'ורוד': '#FFC0CB', 'ורוד בייבי': '#f1b1d0', 'ורוד ביבי': '#f1b1d0', 'ביבי': '#f1b1d0', 'בייבי': '#f1b1d0', 'פוקסיה': '#ec008c',
     'ורוד פוקסיה': '#ec008c', 'סגול': '#311d72', 'סגול כהה': '#4B0082', 'חציל': '#4B0082',
@@ -151,6 +151,40 @@ def resolve_print_color(req, shirt):
 def get_hex(name):
     val = get_hex_smart(name)
     return val if val != 'ORIGINAL' else None
+
+def _is_gray_color_name(name: str) -> bool:
+    n = name.strip()
+    return n == 'אפור' or n.startswith('אפור') or n in ('מלנץ', 'גרפיט', 'אנטרציט')
+
+def _is_burgundy_color_name(name: str) -> bool:
+    return name.strip() in ('בורדו', 'יין', 'אדום')
+
+def _is_olive_color_name(name: str) -> bool:
+    n = name.strip()
+    return n in ('זית', 'זיית', 'ירוק זית') or n.startswith('ירוק זית')
+
+def _is_black_color_name(name: str) -> bool:
+    return name.strip() == 'שחור'
+
+def normalize_split_product_color(col_raw: str) -> str:
+    """אפור+בורדו/אדום: תמיד אפור ראשון (Side1), בורדו/אדום שני (Side2).
+    זית+שחור: צבע יחיד – שחור בלבד."""
+    if not col_raw or '-' not in col_raw:
+        return col_raw
+    parts = [p.strip() for p in col_raw.split("-")]
+    if len(parts) != 2:
+        return col_raw
+    first, second = parts[0], parts[1]
+    if (_is_olive_color_name(first) and _is_black_color_name(second)) or (
+        _is_black_color_name(first) and _is_olive_color_name(second)
+    ):
+        return 'שחור'
+    if _is_gray_color_name(first) and _is_burgundy_color_name(second):
+        return col_raw
+    if _is_burgundy_color_name(first) and _is_gray_color_name(second):
+        return f"{second}-{first}"
+    return col_raw
+
 def get_unique_filename(path):
     if not os.path.exists(path): return path
     base, ext = os.path.splitext(path)
@@ -379,7 +413,7 @@ def process_single_product_to_temp(order, idx, folder, is_wholesale=False, order
                 res = vec_single(loc, folder, API_ID, API_SECRET)
                 if res:
                     svgs[s] = res
-        col_raw = order.get('product_color_hebrew', "")
+        col_raw = normalize_split_product_color(order.get('product_color_hebrew', ""))
         parts = [p.strip() for p in col_raw.split("-")] if "-" in col_raw else [col_raw]
         h1 = get_hex_smart(parts[0])
         h2 = get_hex_smart(parts[1]) if len(parts) >= 2 else h1

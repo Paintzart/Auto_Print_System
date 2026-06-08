@@ -1,6 +1,6 @@
 
     #target illustrator
-    var files = ["C:/Users/yarde/OneDrive/Desktop/Auto_Print_System/temp_ai_files/temp_0.ai", "C:/Users/yarde/OneDrive/Desktop/Auto_Print_System/temp_ai_files/temp_1.ai"];
+    var files = ["C:/Users/yarde/OneDrive/Desktop/Auto_Print_System/temp_ai_files/temp_0.ai"];
     function main() {
         if (files.length === 0) return;
         app.userInteractionLevel = UserInteractionLevel.DONTDISPLAYALERTS;
