@@ -164,6 +164,7 @@ function colRec(it, c) {
         if (it.typename === 'GroupItem') {
             for (var i=0; i<it.pageItems.length; i++) colRec(it.pageItems[i], c);
         } else if (it.typename === 'PathItem' && !it.clipping) {
+            if (it.stroked && !it.filled) { it.strokeColor = c; }
             it.filled=true; it.fillColor=c; it.stroked=false;
         } else if (it.typename === 'CompoundPathItem') {
             for (var j=0; j<it.pathItems.length; j++) {
@@ -180,6 +181,60 @@ try{
     run("%LNAME%", "%GNAME%", %R%, %G%, %B%, doColor, isR);
 }catch(e){}
 """
+
+JSX_RECOLOR_GROUP = """
+#target illustrator
+function colRec(it, c) {
+    try {
+        if (it.typename === 'GroupItem') {
+            for (var i=0; i<it.pageItems.length; i++) colRec(it.pageItems[i], c);
+        } else if (it.typename === 'PathItem' && !it.clipping) {
+            if (it.stroked && !it.filled) { it.strokeColor = c; }
+            it.filled=true; it.fillColor=c; it.stroked=false;
+        } else if (it.typename === 'CompoundPathItem') {
+            for (var j=0; j<it.pathItems.length; j++) {
+                if (!it.pathItems[j].clipping) {
+                    it.pathItems[j].filled=true; it.pathItems[j].fillColor=c; it.pathItems[j].stroked=false;
+                }
+            }
+        } else if (it.typename === 'TextFrame') {
+            try {
+                var chars = it.textRange.characters;
+                for (var ti = 0; ti < chars.length; ti++) {
+                    chars[ti].characterAttributes.fillColor = c;
+                    chars[ti].characterAttributes.filled = true;
+                    chars[ti].characterAttributes.stroked = false;
+                }
+            } catch(e) {}
+        }
+    } catch(e) { }
+}
+function makePrintColor(r, g, b) {
+    try {
+        if (app.activeDocument.documentColorSpace == DocumentColorSpace.CMYK) {
+            var cmykArr = app.convertSampleColor(
+                ImageColorSpace.RGB, ColorModel.PROCESS, [r, g, b],
+                ImageColorSpace.CMYK, ColorModel.PROCESS, []
+            );
+            var cm = new CMYKColor();
+            cm.cyan = cmykArr[0];
+            cm.magenta = cmykArr[1];
+            cm.yellow = cmykArr[2];
+            cm.black = cmykArr[3];
+            return cm;
+        }
+    } catch(e) {}
+    var rgb = new RGBColor();
+    rgb.red = r; rgb.green = g; rgb.blue = b;
+    return rgb;
+}
+try {
+    var grpN = "%GNAME%";
+    var group = app.activeDocument.pageItems.getByName(grpN);
+    if (group) colRec(group, makePrintColor(%R%, %G%, %B%));
+} catch(e) {}
+"""
+
 JSX_DUPLICATE_AND_POS = """
 #target illustrator
 function runSim(originalName, simName, r, g, b, prefix, category, doRecolor) {
@@ -859,6 +914,879 @@ def apply_text_overrides_in_layer(app, layer_name: str, overrides: dict) -> None
     run_jsx(app, jsx)
 
 
+def place_variable_template_variant(
+    app,
+    template_path: str,
+    product_doc_name: str,
+    layer_name: str,
+    artboard_name: str,
+    prefix: str,
+    text_overrides: Optional[dict] = None,
+    image_files: Optional[dict] = None,
+    outline_text: bool = True,
+    skip_simulation: bool = False,
+    sim_hex: Optional[str] = None,
+    print_hex: Optional[str] = None,
+    product_doc=None,
+    category: str = "A4",
+    shared_template: bool = True,
+    slot_id: int = 1,
+) -> float:
+    """מלביש תוכן מתבנית AI ב-1:1 — שומר גופן, גודל ומיקום יחסי בתוך הארטבורד (בלי scale ובלי מירכוז)."""
+    if not template_path or not os.path.exists(template_path):
+        print(f"   > Template missing: {template_path}")
+        return 0.0
+    text_overrides = text_overrides or {}
+    image_files = image_files or {}
+    safe_tpl = template_path.replace("\\", "/").replace('"', '\\"')
+    safe_doc = product_doc_name.replace("\\", "\\\\").replace('"', '\\"').replace("'", "\\'")
+    safe_layer = layer_name.replace("\\", "\\\\").replace('"', '\\"')
+    safe_ab = artboard_name.replace("\\", "\\\\").replace('"', '\\"')
+    text_js = json.dumps({str(k): str(v) for k, v in text_overrides.items()}, ensure_ascii=False)
+    img_js = json.dumps(
+        {str(k): p.replace("\\", "/") for k, p in image_files.items() if p and os.path.exists(p)},
+        ensure_ascii=False,
+    )
+    sr, sg, sb = hex_to_rgb(sim_hex) if sim_hex else (0, 0, 0)
+    pr, pg, pb = hex_to_rgb(print_hex) if print_hex else (sr, sg, sb)
+    do_print_color = "true" if print_hex or sim_hex else "false"
+    do_sim = "false" if skip_simulation else "true"
+    do_outline = "true" if outline_text else "false"
+    safe_cat = json.dumps(str(category or "A4"))
+    shared_tpl = "true" if shared_template else "false"
+    group_name = f"P_{prefix}_s{int(slot_id)}"
+    safe_group = group_name.replace("\\", "\\\\").replace('"', '\\"')
+    jsx = f"""
+    #target illustrator
+    (function() {{
+        var TEMPLATE_PATH = "{safe_tpl}";
+        var PRODUCT_DOC_NAME = "{safe_doc}";
+        var LAYER_NAME = "{safe_layer}";
+        var ARTBOARD_NAME = "{safe_ab}";
+        var PREFIX = "{prefix}";
+        var TEXT_OVERRIDES = {text_js};
+        var IMAGE_FILES = {img_js};
+        var OUTLINE_TEXT = {do_outline};
+        var DO_SIMULATION = {do_sim};
+        var SIM_R = {sr}; var SIM_G = {sg}; var SIM_B = {sb};
+        var PRINT_R = {pr}; var PRINT_G = {pg}; var PRINT_B = {pb};
+        var DO_PRINT_COLOR = {do_print_color};
+        var CATEGORY = {safe_cat};
+        var SHARED_TEMPLATE = {shared_tpl};
+        var GROUP_NAME = "{safe_group}";
+
+        function findNamedItem(container, name) {{
+            try {{
+                if (container.pageItems) {{
+                    for (var i = 0; i < container.pageItems.length; i++) {{
+                        var it = container.pageItems[i];
+                        if (it.name === name) return it;
+                        if (it.typename === "GroupItem") {{
+                            var r = findNamedItem(it, name);
+                            if (r) return r;
+                        }}
+                    }}
+                }}
+            }} catch(e) {{}}
+            if (container.layers) {{
+                for (var j = 0; j < container.layers.length; j++) {{
+                    var r2 = findNamedItem(container.layers[j], name);
+                    if (r2) return r2;
+                }}
+            }}
+            try {{
+                if (container.textFrames) {{
+                    var tf = container.textFrames.getByName(name);
+                    if (tf) return tf;
+                }}
+            }} catch(e) {{}}
+            return null;
+        }}
+        function findGroup(container, name) {{
+            var direct = findNamedItem(container, name);
+            if (direct && direct.typename === "GroupItem") return direct;
+            if (container.layers) {{
+                for (var i = 0; i < container.layers.length; i++) {{
+                    var r = findGroup(container.layers[i], name);
+                    if (r) return r;
+                }}
+            }}
+            if (container.pageItems) {{
+                for (var j = 0; j < container.pageItems.length; j++) {{
+                    var it = container.pageItems[j];
+                    if (it.typename === "GroupItem" && it.name === name) return it;
+                    if (it.typename === "GroupItem") {{
+                        var r2 = findGroup(it, name);
+                        if (r2) return r2;
+                    }}
+                }}
+            }}
+            return null;
+        }}
+        function replaceNamedImage(container, name, filePath) {{
+            var item = findNamedItem(container, name);
+            if (!item || !filePath) return;
+            var bounds = item.visibleBounds;
+            var parent = item.parent;
+            item.remove();
+            var file = new File(filePath);
+            if (!file.exists) return;
+            var placed = parent.placedItems.add();
+            placed.file = file;
+            placed.name = name;
+            try {{ placed.embed(); }} catch(e) {{}}
+            var nb = placed.visibleBounds;
+            var bw = bounds[2] - bounds[0];
+            var bh = bounds[1] - bounds[3];
+            var iw = nb[2] - nb[0];
+            var ih = nb[1] - nb[3];
+            if (iw > 0 && ih > 0) {{
+                var sc = Math.min((bw / iw) * 100, (bh / ih) * 100);
+                placed.resize(sc, sc);
+                nb = placed.visibleBounds;
+            }}
+            var cx = bounds[0] + bw / 2;
+            var cy = bounds[1] - bh / 2;
+            placed.position = [cx - placed.width / 2, cy + placed.height / 2];
+        }}
+        function captureCharStyle(charItem) {{
+            var ca = charItem.characterAttributes;
+            var saved = {{
+                font: ca.textFont,
+                size: ca.size,
+                leading: ca.leading,
+                tracking: ca.tracking,
+                fill: ca.fillColor,
+                stroke: ca.strokeColor,
+                stroked: ca.stroked,
+                filled: ca.filled,
+                hScale: ca.horizontalScale,
+                vScale: ca.verticalScale
+            }};
+            try {{ saved.baselineShift = ca.baselineShift; }} catch(e) {{}}
+            try {{ saved.dir = ca.direction; }} catch(e) {{}}
+            return saved;
+        }}
+        function captureTextStyle(tf) {{
+            var saved = {{}};
+            try {{ saved.kind = tf.kind; }} catch(e) {{}}
+            try {{ saved.width = tf.width; }} catch(e) {{}}
+            try {{ saved.height = tf.height; }} catch(e) {{}}
+            try {{ saved.position = tf.position; }} catch(e) {{}}
+            try {{ saved.orientation = tf.orientation; }} catch(e) {{}}
+            try {{
+                var tr = tf.textRange;
+                var ca = tr.characterAttributes;
+                var pa = tr.paragraphAttributes;
+                saved.font = ca.textFont;
+                saved.size = ca.size;
+                saved.leading = ca.leading;
+                saved.tracking = ca.tracking;
+                saved.fill = ca.fillColor;
+                saved.stroke = ca.strokeColor;
+                saved.stroked = ca.stroked;
+                saved.filled = ca.filled;
+                saved.hScale = ca.horizontalScale;
+                saved.vScale = ca.verticalScale;
+                try {{ saved.baselineShift = ca.baselineShift; }} catch(e2) {{}}
+                try {{ saved.dir = ca.direction; }} catch(e2) {{}}
+                try {{ saved.justification = pa.justification; }} catch(e2) {{}}
+                try {{ saved.autoLeading = pa.autoLeadingAmount; }} catch(e2) {{}}
+                try {{ saved.leftIndent = pa.leftIndent; }} catch(e2) {{}}
+                try {{ saved.rightIndent = pa.rightIndent; }} catch(e2) {{}}
+                try {{ saved.firstLineIndent = pa.firstLineIndent; }} catch(e2) {{}}
+                try {{ saved.spaceBefore = pa.spaceBefore; }} catch(e2) {{}}
+                try {{ saved.spaceAfter = pa.spaceAfter; }} catch(e2) {{}}
+                saved.paragraphs = [];
+                var paras = tr.paragraphs;
+                for (var pi = 0; pi < paras.length; pi++) {{
+                    var pAttr = paras[pi].paragraphAttributes;
+                    saved.paragraphs.push({{
+                        justification: pAttr.justification,
+                        autoLeading: pAttr.autoLeadingAmount,
+                        leftIndent: pAttr.leftIndent,
+                        rightIndent: pAttr.rightIndent,
+                        firstLineIndent: pAttr.firstLineIndent,
+                        spaceBefore: pAttr.spaceBefore,
+                        spaceAfter: pAttr.spaceAfter
+                    }});
+                }}
+            }} catch(e) {{
+                try {{
+                    var chars = tf.textRange.characters;
+                    if (chars && chars.length > 0) {{
+                        var cs = captureCharStyle(chars[0]);
+                        for (var sk in cs) {{ if (cs.hasOwnProperty(sk)) saved[sk] = cs[sk]; }}
+                    }}
+                }} catch(e3) {{}}
+            }}
+            return saved;
+        }}
+        function applyParagraphStyleOnly(tf, saved) {{
+            if (!tf || !saved) return;
+            function applyParaAttrs(pa, src) {{
+                if (!pa || !src) return;
+                try {{
+                    if (src.justification !== undefined) pa.justification = src.justification;
+                    if (src.autoLeading !== undefined) pa.autoLeadingAmount = src.autoLeading;
+                    if (src.leftIndent !== undefined) pa.leftIndent = src.leftIndent;
+                    if (src.rightIndent !== undefined) pa.rightIndent = src.rightIndent;
+                    if (src.firstLineIndent !== undefined) pa.firstLineIndent = src.firstLineIndent;
+                    if (src.spaceBefore !== undefined) pa.spaceBefore = src.spaceBefore;
+                    if (src.spaceAfter !== undefined) pa.spaceAfter = src.spaceAfter;
+                }} catch(e) {{}}
+            }}
+            try {{ applyParaAttrs(tf.textRange.paragraphAttributes, saved); }} catch(e) {{}}
+            try {{
+                var paras = tf.textRange.paragraphs;
+                var paraStyles = saved.paragraphs || [];
+                for (var pi = 0; pi < paras.length; pi++) {{
+                    var src = paraStyles.length > 0
+                        ? paraStyles[Math.min(pi, paraStyles.length - 1)]
+                        : saved;
+                    applyParaAttrs(paras[pi].paragraphAttributes, src);
+                }}
+            }} catch(e) {{}}
+        }}
+        function restoreTextFrameGeometry(tf, saved) {{
+            if (!tf || !saved) return;
+            try {{
+                if (saved.orientation !== undefined && saved.orientation !== null) tf.orientation = saved.orientation;
+            }} catch(e) {{}}
+            try {{
+                if (saved.kind === TextType.AREATEXT) {{
+                    if (saved.width > 0) tf.width = saved.width;
+                    if (saved.height > 0) tf.height = saved.height;
+                }}
+                if (saved.position) tf.position = saved.position;
+            }} catch(e) {{}}
+        }}
+        function applyCharStyle(charItem, saved) {{
+            if (!charItem || !saved) return;
+            var ca = charItem.characterAttributes;
+            try {{
+                if (saved.font) ca.textFont = saved.font;
+                if (saved.size) ca.size = saved.size;
+                if (saved.leading) ca.leading = saved.leading;
+                ca.tracking = saved.tracking;
+                if (saved.fill) ca.fillColor = saved.fill;
+                if (saved.stroke) ca.strokeColor = saved.stroke;
+                ca.stroked = saved.stroked;
+                ca.filled = saved.filled;
+                ca.horizontalScale = saved.hScale;
+                ca.verticalScale = saved.vScale;
+                if (saved.baselineShift !== undefined) ca.baselineShift = saved.baselineShift;
+                if (saved.dir !== undefined) ca.direction = saved.dir;
+            }} catch(e) {{}}
+        }}
+        function applyTextStyle(tf, saved) {{
+            if (!tf || !saved) return;
+            applyParagraphStyleOnly(tf, saved);
+            try {{
+                var chars = tf.textRange.characters;
+                for (var ci = 0; ci < chars.length; ci++) applyCharStyle(chars[ci], saved);
+            }} catch(e) {{}}
+            restoreTextFrameGeometry(tf, saved);
+        }}
+        function applyStyleToAllChars(tf, saved) {{
+            applyTextStyle(tf, saved);
+        }}
+        function captureTextAnchor(tf) {{
+            var b = tf.visibleBounds;
+            var anchor = {{
+                left: b[0],
+                right: b[2],
+                top: b[1],
+                bottom: b[3],
+                centerX: (b[0] + b[2]) / 2,
+                centerY: b[1] - (b[1] - b[3]) / 2,
+                justification: null,
+                position: null
+            }};
+            try {{ anchor.justification = tf.textRange.paragraphAttributes.justification; }} catch(e) {{}}
+            try {{ anchor.position = [tf.position[0], tf.position[1]]; }} catch(e) {{}}
+            return anchor;
+        }}
+        function lockTextFrameAnchor(tf, anchor) {{
+            if (!tf || !anchor) return;
+            try {{
+                if (anchor.position) {{
+                    tf.position = anchor.position;
+                    return;
+                }}
+            }} catch(e) {{}}
+            var b = tf.visibleBounds;
+            var ny = b[1] - (b[1] - b[3]) / 2;
+            var dy = anchor.centerY - ny;
+            var dx = 0;
+            var just = anchor.justification;
+            if (just === Justification.CENTER) {{
+                dx = anchor.centerX - (b[0] + b[2]) / 2;
+            }} else if (just === Justification.RIGHT) {{
+                dx = anchor.right - b[2];
+            }} else {{
+                dx = anchor.left - b[0];
+            }}
+            tf.translate(dx, dy);
+        }}
+        function setTextPreserveStyle(tf, newText) {{
+            if (!tf || tf.typename !== "TextFrame") return;
+            newText = String(newText);
+            if (String(tf.contents) === newText) return;
+            tf.locked = false;
+            tf.hidden = false;
+            var saved = captureTextStyle(tf);
+            var anchorBefore = captureTextAnchor(tf);
+            var chars = null;
+            try {{ chars = tf.textRange.characters; }} catch(e) {{ chars = null; }}
+            var oldLen = chars ? chars.length : 0;
+            var newChars = [];
+            for (var ni = 0; ni < newText.length; ni++) newChars.push(newText.charAt(ni));
+            var newLen = newChars.length;
+            if (oldLen > 0) {{
+                var styleSource = saved;
+                try {{
+                    var cs0 = captureCharStyle(chars[0]);
+                    for (var sk in cs0) {{ if (cs0.hasOwnProperty(sk)) styleSource[sk] = cs0[sk]; }}
+                }} catch(e) {{}}
+                if (newLen <= oldLen) {{
+                    for (var i = 0; i < newLen; i++) {{
+                        chars[i].contents = newChars[i];
+                        applyCharStyle(chars[i], styleSource);
+                    }}
+                    for (var d = oldLen - 1; d >= newLen; d--) {{
+                        chars[d].remove();
+                    }}
+                }} else {{
+                    for (var j = 0; j < oldLen; j++) {{
+                        chars[j].contents = newChars[j];
+                        applyCharStyle(chars[j], styleSource);
+                    }}
+                    var anchor = tf.textRange.characters[oldLen - 1];
+                    for (var e = oldLen; e < newLen; e++) {{
+                        var nc = anchor.duplicate();
+                        nc.contents = newChars[e];
+                        applyCharStyle(nc, styleSource);
+                        anchor = nc;
+                    }}
+                }}
+            }} else {{
+                try {{ tf.textRange.contents = newText; }} catch(err) {{ tf.contents = newText; }}
+                try {{
+                    var allChars = tf.textRange.characters;
+                    for (var ac = 0; ac < allChars.length; ac++) applyCharStyle(allChars[ac], saved);
+                }} catch(e) {{}}
+            }}
+            applyParagraphStyleOnly(tf, saved);
+            try {{
+                if (saved.kind === TextType.AREATEXT) {{
+                    if (saved.width > 0) tf.width = saved.width;
+                    if (saved.height > 0) tf.height = saved.height;
+                }}
+                if (saved.orientation !== undefined && saved.orientation !== null) tf.orientation = saved.orientation;
+            }} catch(e) {{}}
+            lockTextFrameAnchor(tf, anchorBefore);
+        }}
+        function forEachTextFrame(root, fn) {{
+            try {{
+                if (root.textFrames) {{
+                    for (var t = 0; t < root.textFrames.length; t++) fn(root.textFrames[t]);
+                }}
+            }} catch(e) {{}}
+            if (root.pageItems) {{
+                for (var i = 0; i < root.pageItems.length; i++) {{
+                    if (root.pageItems[i].typename === "GroupItem") forEachTextFrame(root.pageItems[i], fn);
+                }}
+            }}
+            if (root.layers) {{
+                for (var j = 0; j < root.layers.length; j++) forEachTextFrame(root.layers[j], fn);
+            }}
+        }}
+        function isActiveOverrideKey(name, overrides) {{
+            if (overrides[name]) return true;
+            var upper = String(name).toUpperCase();
+            for (var k in overrides) {{
+                if (!overrides.hasOwnProperty(k)) continue;
+                if (String(k).toUpperCase() === upper) return true;
+                var cands = buildTextKeyCandidates(k);
+                for (var ci = 0; ci < cands.length; ci++) {{
+                    if (String(cands[ci]).toUpperCase() === upper) return true;
+                }}
+            }}
+            return false;
+        }}
+        function isVariableTextFrameName(nm) {{
+            if (!nm) return false;
+            if (/^(TEXT|NUM|NUMBER)[_]?\\d+$/i.test(nm)) return true;
+            if (/^TEXT_(NAME|NUMBER|NUM\\d+)$/i.test(nm)) return true;
+            return false;
+        }}
+        function buildTextKeyCandidates(key) {{
+            var want = String(key).toUpperCase();
+            var candidates = [want, String(key)];
+            var textMatch = want.match(/^TEXT[_]?(\\d+)$/);
+            if (textMatch) {{
+                var n = textMatch[1];
+                candidates.push("TEXT" + n);
+                candidates.push("TEXT_" + n);
+            }}
+            var numMatch = want.match(/^(NUM|NUMBER)[_]?(\d+)$/);
+            if (numMatch) {{
+                var num = numMatch[2];
+                candidates.push("NUM" + num);
+                candidates.push("NUM_" + num);
+                candidates.push("NUMBER" + num);
+                candidates.push("NUMBER_" + num);
+            }}
+            if (want === "TEXT_NAME" || want === "TEXTNAME") candidates.push("TEXT1");
+            if (want === "TEXT_NUMBER" || want === "TEXTNUMBER") candidates.push("TEXT2");
+            var unique = [];
+            for (var ui = 0; ui < candidates.length; ui++) {{
+                var c = candidates[ui];
+                if (unique.indexOf(c) < 0) unique.push(c);
+            }}
+            return unique;
+        }}
+        function findTextFrameForOverride(doc, key) {{
+            var direct = findNamedItem(doc, key);
+            if (direct && direct.typename === "TextFrame") return direct;
+            var candidates = buildTextKeyCandidates(key);
+            var found = null;
+            forEachTextFrame(doc, function(tf) {{
+                if (found) return;
+                var nm = tf.name || "";
+                for (var ci = 0; ci < candidates.length; ci++) {{
+                    if (nm === candidates[ci]) {{ found = tf; return; }}
+                    if (nm.toUpperCase() === String(candidates[ci]).toUpperCase()) {{ found = tf; return; }}
+                }}
+            }});
+            return found;
+        }}
+        function removeUnusedNamedTexts(doc, overrides) {{
+            var toRemove = [];
+            forEachTextFrame(doc, function(tf) {{
+                var nm = tf.name;
+                if (!isVariableTextFrameName(nm)) return;
+                if (!isActiveOverrideKey(nm, overrides)) toRemove.push(tf);
+            }});
+            for (var ri = 0; ri < toRemove.length; ri++) {{
+                try {{ toRemove[ri].remove(); }} catch(e) {{}}
+            }}
+        }}
+        function clearLayerPrintContent(layer) {{
+            if (!layer) return;
+            layer.locked = false;
+            for (var i = layer.pageItems.length - 1; i >= 0; i--) {{
+                var it = layer.pageItems[i];
+                var n = it.name || "";
+                if (n.indexOf("_Box_") !== -1) continue;
+                try {{ it.remove(); }} catch(e) {{}}
+            }}
+        }}
+        function ensureSinglePrintOnLayer(layer, keepName) {{
+            var nonBox = [];
+            for (var i = 0; i < layer.pageItems.length; i++) {{
+                var it = layer.pageItems[i];
+                if ((it.name || "").indexOf("_Box_") !== -1) continue;
+                nonBox.push(it);
+            }}
+            if (nonBox.length <= 1) {{
+                if (nonBox.length === 1) nonBox[0].name = keepName;
+                return;
+            }}
+            var keeper = null;
+            for (var k = 0; k < nonBox.length; k++) {{
+                if (nonBox[k].name === keepName) {{ keeper = nonBox[k]; break; }}
+            }}
+            if (!keeper) keeper = nonBox[nonBox.length - 1];
+            for (var j = 0; j < nonBox.length; j++) {{
+                if (nonBox[j] !== keeper) {{
+                    try {{ nonBox[j].remove(); }} catch(e) {{}}
+                }}
+            }}
+            keeper.name = keepName;
+        }}
+        function makePrintColor(r, g, b) {{
+            try {{
+                if (app.activeDocument.documentColorSpace == DocumentColorSpace.CMYK) {{
+                    var cmykArr = app.convertSampleColor(
+                        ImageColorSpace.RGB, ColorModel.PROCESS, [r, g, b],
+                        ImageColorSpace.CMYK, ColorModel.PROCESS, []
+                    );
+                    var cm = new CMYKColor();
+                    cm.cyan = cmykArr[0];
+                    cm.magenta = cmykArr[1];
+                    cm.yellow = cmykArr[2];
+                    cm.black = cmykArr[3];
+                    return cm;
+                }}
+            }} catch(e) {{}}
+            var rgb = new RGBColor();
+            rgb.red = r; rgb.green = g; rgb.blue = b;
+            return rgb;
+        }}
+        function colRec(it, c) {{
+            try {{
+                if (it.typename === "GroupItem") {{
+                    for (var ci = 0; ci < it.pageItems.length; ci++) colRec(it.pageItems[ci], c);
+                }} else if (it.typename === "PathItem" && !it.clipping) {{
+                    if (it.stroked && !it.filled) {{ it.strokeColor = c; }}
+                    it.filled = true; it.fillColor = c; it.stroked = false;
+                }} else if (it.typename === "CompoundPathItem") {{
+                    for (var cj = 0; cj < it.pathItems.length; cj++) {{
+                        if (!it.pathItems[cj].clipping) {{
+                            it.pathItems[cj].filled = true;
+                            it.pathItems[cj].fillColor = c;
+                            it.pathItems[cj].stroked = false;
+                        }}
+                    }}
+                }} else if (it.typename === "TextFrame") {{
+                    try {{
+                        var chars = it.textRange.characters;
+                        for (var ti = 0; ti < chars.length; ti++) {{
+                            chars[ti].characterAttributes.fillColor = c;
+                            chars[ti].characterAttributes.filled = true;
+                            chars[ti].characterAttributes.stroked = false;
+                        }}
+                    }} catch(e) {{}}
+                }}
+            }} catch(e) {{}}
+        }}
+        function recolorDeep(item, c) {{
+            colRec(item, c);
+        }}
+        function getSimBoxSuffix(category, itemW, itemH) {{
+            var suffix = "A4_Square";
+            var catLower = (category || "A4").toLowerCase();
+            if (category === "Sleeve2") suffix = "Sleeve2";
+            else if (catLower.indexOf("sleeve") !== -1 || catLower.indexOf("9") !== -1 || catLower.indexOf("\\u05e9\\u05e8\\u05d5\\u05d5\\u05dc") !== -1) suffix = "Sleeve";
+            else if (category === "Pocket") suffix = "Pocket";
+            else if (category === "2Pocket") suffix = "2Pocket";
+            else if (category === "2") suffix = "2";
+            else if (category === "A3") suffix = "A3";
+            else if (category === "A5") suffix = "A5";
+            else if (category === "A4") {{
+                var ratio = itemW / itemH;
+                if (ratio > 1.21) suffix = "A4_Landscape";
+                else if (ratio < 0.75) suffix = "A4_Portrait";
+                else suffix = "A4_Square";
+            }}
+            return suffix;
+        }}
+        function placeSimExactFromTemplate(simItem, layoutOff, tplW, tplH, prefix, category) {{
+            var suffix = getSimBoxSuffix(category, tplW, tplH);
+            var boxName = "S" + prefix + "_Box_" + suffix;
+            var box = findNamedItem(prodDoc, boxName);
+            if (!box) {{
+                try {{ box = prodDoc.pageItems.getByName(boxName); }} catch(e) {{ return; }}
+            }}
+            if (!box) return;
+            var b = box.visibleBounds;
+            var boxW = b[2] - b[0];
+            var boxH = b[1] - b[3];
+            var scale = 1.0;
+            if (tplW > 0 && tplH > 0) {{
+                scale = Math.min(boxW / tplW, boxH / tplH);
+            }}
+            if (Math.abs(scale - 1.0) > 0.001) {{
+                try {{
+                    simItem.resize(scale * 100, scale * 100, true, true, true, true, scale * 100, Transformation.TOPLEFT);
+                }} catch(e) {{
+                    simItem.resize(scale * 100, scale * 100);
+                }}
+            }}
+            var targetLeft = b[0] + layoutOff.relL * scale;
+            var targetTop = b[1] - layoutOff.relT * scale;
+            var sb = simItem.visibleBounds;
+            simItem.translate(targetLeft - sb[0], targetTop - sb[1]);
+        }}
+        function outlineAllNamedTexts(doc) {{
+            var frames = [];
+            forEachTextFrame(doc, function(tf) {{
+                var nm = tf.name;
+                if (!isVariableTextFrameName(nm)) return;
+                frames.push(tf);
+            }});
+            for (var oi = 0; oi < frames.length; oi++) {{
+                try {{ frames[oi].createOutline(); }} catch(e) {{}}
+            }}
+        }}
+        function outlineTextKeys(container, keys) {{
+            for (var ki = 0; ki < keys.length; ki++) {{
+                var tf = findNamedItem(container, keys[ki]);
+                if (!tf || tf.typename !== "TextFrame") {{
+                    tf = findTextFrameForOverride(container, keys[ki]);
+                }}
+                if (tf && tf.typename === "TextFrame") {{
+                    try {{ tf.createOutline(); }} catch(e) {{}}
+                }}
+            }}
+        }}
+        function recolorItem(it, c) {{
+            recolorDeep(it, c);
+        }}
+        function alignCenterToArtboard(item, abRect) {{
+            var b = item.visibleBounds;
+            var icx = b[0] + (b[2] - b[0]) / 2;
+            var icy = b[1] - (b[1] - b[3]) / 2;
+            var abCx = (abRect[0] + abRect[2]) / 2;
+            var abCy = abRect[1] - (abRect[1] - abRect[3]) / 2;
+            item.translate(abCx - icx, abCy - icy);
+        }}
+        function captureArtboardOffset(item, abRect) {{
+            var b = item.visibleBounds;
+            return {{
+                relL: b[0] - abRect[0],
+                relT: abRect[1] - b[1]
+            }};
+        }}
+        function placeAtArtboardOffset(item, abRect, relL, relT) {{
+            var b = item.visibleBounds;
+            var targetLeft = abRect[0] + relL;
+            var targetTop = abRect[1] - relT;
+            item.translate(targetLeft - b[0], targetTop - b[1]);
+        }}
+        function resizeArtboardTopLeft(ab, w, h) {{
+            var r = ab.artboardRect;
+            ab.artboardRect = [r[0], r[1], r[0] + w, r[1] - h];
+            return ab.artboardRect;
+        }}
+        function itemIntersectsArtboard(item, abRect) {{
+            try {{
+                var b = item.visibleBounds;
+                if (b[2] <= abRect[0] || b[0] >= abRect[2]) return false;
+                if (b[1] <= abRect[3] || b[3] >= abRect[1]) return false;
+                return true;
+            }} catch(e) {{ return false; }}
+        }}
+        function collectTopItemsOnArtboard(container, abRect, out) {{
+            if (container.pageItems) {{
+                for (var i = 0; i < container.pageItems.length; i++) {{
+                    var it = container.pageItems[i];
+                    if (it.hidden) continue;
+                    if (itemIntersectsArtboard(it, abRect)) out.push(it);
+                }}
+            }}
+            if (container.layers) {{
+                for (var j = 0; j < container.layers.length; j++) {{
+                    var sub = container.layers[j];
+                    if (!sub.visible) continue;
+                    sub.locked = false;
+                    collectTopItemsOnArtboard(sub, abRect, out);
+                }}
+            }}
+        }}
+        function resolveCopyRoot(doc, abRect) {{
+            var named = findGroup(doc, GROUP_NAME);
+            if (named) return named;
+            var varPrint = findGroup(doc, "VAR_PRINT");
+            if (varPrint) return varPrint;
+            var items = [];
+            for (var li = 0; li < doc.layers.length; li++) {{
+                var layer = doc.layers[li];
+                if (!layer.visible) continue;
+                layer.locked = false;
+                collectTopItemsOnArtboard(layer, abRect, items);
+            }}
+            if (items.length === 0) return null;
+            if (items.length === 1) return items[0];
+            var hostLayer = items[0].layer;
+            hostLayer.locked = false;
+            var grp = hostLayer.groupItems.add();
+            grp.name = GROUP_NAME;
+            for (var ii = 0; ii < items.length; ii++) {{
+                items[ii].moveToEnd(grp);
+            }}
+            return grp;
+        }}
+        function findProductDoc(name) {{
+            for (var i = 0; i < app.documents.length; i++) {{
+                if (app.documents[i].name === name) return app.documents[i];
+            }}
+            return null;
+        }}
+
+        var prodDoc = findProductDoc(PRODUCT_DOC_NAME);
+        if (!prodDoc) {{
+            for (var di = 0; di < app.documents.length; di++) {{
+                var dn = app.documents[di].name;
+                if (dn === PRODUCT_DOC_NAME || dn.indexOf(PRODUCT_DOC_NAME.replace(".ai", "")) !== -1) {{
+                    prodDoc = app.documents[di];
+                    break;
+                }}
+            }}
+        }}
+        if (!prodDoc) return -1;
+
+        app.activeDocument = prodDoc;
+        var tplDoc = app.open(new File(TEMPLATE_PATH));
+        app.activeDocument = tplDoc;
+        app.executeMenuCommand("unlockAll");
+
+        var tplAbIdx = tplDoc.artboards.getActiveArtboardIndex();
+        var tplAb = tplDoc.artboards[tplAbIdx].artboardRect;
+        var tplW = tplAb[2] - tplAb[0];
+        var tplH = tplAb[1] - tplAb[3];
+
+        var textKeys = [];
+        var hasOverrides = false;
+        for (var tk in TEXT_OVERRIDES) {{
+            if (!TEXT_OVERRIDES.hasOwnProperty(tk)) continue;
+            hasOverrides = true;
+            var tf = findTextFrameForOverride(tplDoc, tk);
+            if (tf && tf.typename === "TextFrame") {{
+                setTextPreserveStyle(tf, TEXT_OVERRIDES[tk]);
+                textKeys.push(tf.name || tk);
+            }}
+        }}
+        if (SHARED_TEMPLATE === "true" && hasOverrides) {{
+            removeUnusedNamedTexts(tplDoc, TEXT_OVERRIDES);
+        }}
+        for (var ik in IMAGE_FILES) {{
+            if (IMAGE_FILES.hasOwnProperty(ik)) {{
+                replaceNamedImage(tplDoc, ik, IMAGE_FILES[ik]);
+            }}
+        }}
+        if (OUTLINE_TEXT) {{
+            if (textKeys.length > 0) {{
+                outlineTextKeys(tplDoc, textKeys);
+            }} else if (!hasOverrides) {{
+                outlineAllNamedTexts(tplDoc);
+            }}
+        }}
+
+        var copyRoot = resolveCopyRoot(tplDoc, tplAb);
+        if (!copyRoot) {{
+            tplDoc.close(SaveOptions.DONOTSAVECHANGES);
+            return -2;
+        }}
+        copyRoot.name = GROUP_NAME;
+        var layoutOff = captureArtboardOffset(copyRoot, tplAb);
+
+        if (DO_PRINT_COLOR === "true") {{
+            var pc = makePrintColor(PRINT_R, PRINT_G, PRINT_B);
+            colRec(copyRoot, pc);
+        }}
+
+        tplDoc.selection = null;
+        copyRoot.selected = true;
+        app.executeMenuCommand("copy");
+        tplDoc.close(SaveOptions.DONOTSAVECHANGES);
+
+        app.activeDocument = prodDoc;
+        app.executeMenuCommand("unlockAll");
+        var targetLayer = null;
+        try {{ targetLayer = prodDoc.layers.getByName(LAYER_NAME); }} catch(e) {{ return -3; }}
+        if (!targetLayer) return -3;
+        targetLayer.locked = false;
+        targetLayer.visible = true;
+        prodDoc.activeLayer = targetLayer;
+        prodDoc.selection = null;
+        clearLayerPrintContent(targetLayer);
+        prodDoc.activeLayer = targetLayer;
+        app.executeMenuCommand("pasteInPlace");
+
+        var placed = null;
+        if (prodDoc.selection && prodDoc.selection.length > 0) {{
+            placed = prodDoc.selection[0];
+        }}
+        if (!placed) {{
+            for (var pi = targetLayer.pageItems.length - 1; pi >= 0; pi--) {{
+                var cand = targetLayer.pageItems[pi];
+                var cn = cand.name || "";
+                if (cn.indexOf("_Box_") !== -1) continue;
+                placed = cand;
+                break;
+            }}
+        }}
+        if (!placed) return -4;
+
+        placed.name = GROUP_NAME;
+        placed.locked = false;
+        placed.hidden = false;
+        try {{
+            if (placed.parent !== targetLayer) placed.moveToEnd(targetLayer);
+        }} catch(e) {{}}
+        ensureSinglePrintOnLayer(targetLayer, GROUP_NAME);
+
+        var targetAb = null;
+        var abIdx = -1;
+        for (var ai = 0; ai < prodDoc.artboards.length; ai++) {{
+            if (prodDoc.artboards[ai].name === ARTBOARD_NAME) {{
+                targetAb = prodDoc.artboards[ai];
+                abIdx = ai;
+                break;
+            }}
+        }}
+        if (!targetAb) return -5;
+
+        prodDoc.artboards.setActiveArtboardIndex(abIdx);
+        var targetRect = resizeArtboardTopLeft(targetAb, tplW, tplH);
+        placeAtArtboardOffset(placed, targetRect, layoutOff.relL, layoutOff.relT);
+
+        if (DO_PRINT_COLOR === "true") {{
+            var pc2 = makePrintColor(PRINT_R, PRINT_G, PRINT_B);
+            colRec(placed, pc2);
+        }}
+
+        if (DO_SIMULATION) {{
+            try {{
+                var simLayer = prodDoc.layers.getByName("Simulation");
+                var sideName = "Back";
+                if (PREFIX === "F") sideName = "Front";
+                else if (PREFIX === "RS") sideName = "Right_Sleeve";
+                else if (PREFIX === "LS") sideName = "Left_Sleeve";
+                var simTarget = simLayer.layers.getByName("S_Placement_" + sideName);
+                simLayer.visible = true;
+                simTarget.visible = true;
+                var simCopy = placed.duplicate(simTarget, ElementPlacement.PLACEATEND);
+                simCopy.hidden = false;
+                placeSimExactFromTemplate(simCopy, layoutOff, tplW, tplH, PREFIX, CATEGORY);
+                if (SIM_R + SIM_G + SIM_B > 0) {{
+                    var c = makePrintColor(SIM_R, SIM_G, SIM_B);
+                    recolorItem(simCopy, c);
+                }}
+                simCopy.name = "";
+            }} catch(e) {{}}
+        }}
+
+        var finalB = placed.visibleBounds;
+        return finalB[2] - finalB[0];
+    }})();
+    """
+    try:
+        if product_doc is not None:
+            try:
+                product_doc.Activate()
+            except Exception:
+                pass
+        res = app.DoJavaScript(jsx)
+        if res is None or res == "":
+            print("   > Template placement: empty JSX result")
+            return 0.0
+        val = float(res)
+        if val < 0:
+            err_map = {
+                -1: "product document not found",
+                -2: "no printable content on template artboard",
+                -3: f"print layer not found: {layer_name}",
+                -4: "paste from template failed",
+                -5: f"artboard not found: {artboard_name}",
+            }
+            print(f"   > Template placement failed: {err_map.get(int(val), val)}")
+            return 0.0
+        if print_hex:
+            r, g, b = hex_to_rgb(print_hex)
+            sc = JSX_RECOLOR_GROUP.replace('%GNAME%', group_name)
+            sc = sc.replace('%R%', str(r)).replace('%G%', str(g)).replace('%B%', str(b))
+            run_jsx(app, sc)
+            time.sleep(0.2)
+        return val
+    except Exception as e:
+        print(f"   > Template placement error: {e}")
+        return 0.0
+
+
 def place_and_simulate_print(
     doc,
     app,
@@ -1158,6 +2086,139 @@ def save_pdf(doc, path: str):
     finally:
         try: doc.Close(2)
         except: pass
+def outline_text_in_layers(app, layer_names: list) -> None:
+    """הופך TextFrames בשכבות הנתונות ל-outline."""
+    if not layer_names:
+        return
+    layers_js = json.dumps([str(n) for n in layer_names], ensure_ascii=False)
+    jsx = f"""
+    #target illustrator
+    (function() {{
+        var layerNames = {layers_js};
+        app.executeMenuCommand("unlockAll");
+        function collectTextFrames(container, out) {{
+            try {{
+                if (container.textFrames) {{
+                    for (var t = 0; t < container.textFrames.length; t++) out.push(container.textFrames[t]);
+                }}
+            }} catch(e) {{}}
+            if (container.pageItems) {{
+                for (var i = 0; i < container.pageItems.length; i++) {{
+                    var it = container.pageItems[i];
+                    if (it.typename === "TextFrame") out.push(it);
+                    else if (it.typename === "GroupItem") collectTextFrames(it, out);
+                }}
+            }}
+            if (container.layers) {{
+                for (var j = 0; j < container.layers.length; j++) collectTextFrames(container.layers[j], out);
+            }}
+        }}
+        var outlined = 0;
+        for (var li = 0; li < layerNames.length; li++) {{
+            var layer = null;
+            try {{ layer = app.activeDocument.layers.getByName(layerNames[li]); }} catch(e) {{ continue; }}
+            if (!layer) continue;
+            layer.locked = false;
+            layer.visible = true;
+            var frames = [];
+            collectTextFrames(layer, frames);
+            for (var fi = 0; fi < frames.length; fi++) {{
+                try {{
+                    frames[fi].locked = false;
+                    frames[fi].createOutline();
+                    outlined++;
+                }} catch(e) {{}}
+            }}
+        }}
+        return outlined;
+    }})();
+    """
+    try:
+        res = app.DoJavaScript(jsx)
+        count = int(res) if res not in (None, "") else 0
+        print(f"   > Outlined {count} text frame(s) in print layers")
+    except Exception as e:
+        print(f"   > Outline pass warning: {e}")
+
+
+def outline_document_text(app) -> None:
+    """הופך TextFrames ל-outline — לפי שכבה בבatch כדי לשמור מיקום יחסי בין שדות."""
+    jsx = """
+    #target illustrator
+    (function() {
+        app.executeMenuCommand("unlockAll");
+        var doc = app.activeDocument;
+        function collectTextFrames(container, out) {
+            try {
+                if (container.textFrames) {
+                    for (var t = 0; t < container.textFrames.length; t++) out.push(container.textFrames[t]);
+                }
+            } catch(e) {}
+            if (container.pageItems) {
+                for (var i = 0; i < container.pageItems.length; i++) {
+                    var it = container.pageItems[i];
+                    if (it.typename === "TextFrame") out.push(it);
+                    else if (it.typename === "GroupItem") collectTextFrames(it, out);
+                }
+            }
+        }
+        function collectAllLayers(container, out) {
+            if (!container.layers) return;
+            for (var i = 0; i < container.layers.length; i++) {
+                out.push(container.layers[i]);
+                collectAllLayers(container.layers[i], out);
+            }
+        }
+        function outlineFramesTogether(frames) {
+            if (!frames || frames.length === 0) return 0;
+            if (frames.length === 1) {
+                try {
+                    frames[0].locked = false;
+                    frames[0].createOutline();
+                    return 1;
+                } catch(e) { return 0; }
+            }
+            doc.selection = null;
+            for (var i = 0; i < frames.length; i++) {
+                try {
+                    frames[i].locked = false;
+                    frames[i].selected = true;
+                } catch(e) {}
+            }
+            try {
+                app.executeMenuCommand("outline");
+                doc.selection = null;
+                return frames.length;
+            } catch(e) {
+                var n = 0;
+                for (var j = 0; j < frames.length; j++) {
+                    try { frames[j].createOutline(); n++; } catch(e2) {}
+                }
+                return n;
+            }
+        }
+        var layers = [];
+        collectAllLayers(doc, layers);
+        var outlined = 0;
+        for (var li = 0; li < layers.length; li++) {
+            var layer = layers[li];
+            try { layer.locked = false; } catch(e) {}
+            var frames = [];
+            collectTextFrames(layer, frames);
+            outlined += outlineFramesTogether(frames);
+        }
+        try { doc.selection = null; } catch(e) {}
+        return outlined;
+    })();
+    """
+    try:
+        res = app.DoJavaScript(jsx)
+        count = int(res) if res not in (None, "") else 0
+        print(f"   > Outlined {count} text frame(s) in final document (print + simulation + labels)")
+    except Exception as e:
+        print(f"   > Final outline warning: {e}")
+
+
 def clean_layout(app):
     """מוחק את כל ריבועי העזר (Box) מהקובץ"""
     run_jsx(app, JSX_CLEAN_BOXES)

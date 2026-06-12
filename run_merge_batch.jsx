@@ -25,9 +25,12 @@
             if (m.height > maxHeight) maxHeight = m.height;
             tempDoc.close(SaveOptions.DONOTSAVECHANGES);
         }
-        var STEP_X = maxWidth + 150;
-        var STEP_Y = maxHeight + 250;
-        var COLS = 4;
+        var GAP_X = 150;
+        var GAP_Y = 250;
+        var STEP_X = maxWidth + GAP_X;
+        var STEP_Y = maxHeight + GAP_Y;
+        var COLS = 5;
+        $.writeln("Merge grid: " + files.length + " products, STEP_X=" + STEP_X + " STEP_Y=" + STEP_Y + " COLS=" + COLS);
         var masterDoc = openFileSafe(files[0]);
         organizeMasterContent(masterDoc);
         for (var j = 1; j < files.length; j++) {

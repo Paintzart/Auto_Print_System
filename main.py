@@ -196,30 +196,50 @@ def get_unique_filename(path):
         counter += 1
 def download_image(url_or_base64, filename_prefix):
     try:
+        if not url_or_base64:
+            return None
+        if isinstance(url_or_base64, str) and url_or_base64.startswith("blob:"):
+            print(f"   > Download skip: blob URL not supported ({url_or_base64[:80]})")
+            return None
         if url_or_base64.startswith('data:'):
             header, encoded = url_or_base64.split(',', 1)
             file_ext = '.png'
             if 'image/svg' in header: file_ext = '.svg'
             elif 'pdf' in header: file_ext = '.pdf'
+            elif 'illustrator' in header or 'postscript' in header: file_ext = '.ai'
             path = os.path.join(TEMP_DOWNLOAD_DIR, f"{filename_prefix}{file_ext}")
             with open(path, 'wb') as f: f.write(base64.b64decode(encoded))
             return path
         elif os.path.exists(url_or_base64) or (len(url_or_base64)>1 and url_or_base64[1]==':'):
-            if not os.path.exists(url_or_base64): return None
+            if not os.path.exists(url_or_base64):
+                print(f"   > Download skip: local path not found: {url_or_base64}")
+                return None
             _, ext = os.path.splitext(url_or_base64)
             path = os.path.join(TEMP_DOWNLOAD_DIR, f"{filename_prefix}{ext or '.png'}")
             if os.path.abspath(url_or_base64) != os.path.abspath(path): shutil.copy(url_or_base64, path)
             return path
         elif url_or_base64.startswith('http'):
             ext = ".png"
-            if '.pdf' in url_or_base64.lower(): ext = ".pdf"
-            elif '.svg' in url_or_base64.lower(): ext = ".svg"
+            lower = url_or_base64.lower()
+            if '.pdf' in lower: ext = ".pdf"
+            elif '.svg' in lower: ext = ".svg"
+            elif '.ai' in lower: ext = ".ai"
             path = os.path.join(TEMP_DOWNLOAD_DIR, f"{filename_prefix}{ext}")
-            r = requests.get(url_or_base64, stream=True)
+            r = requests.get(url_or_base64, stream=True, timeout=120)
             if r.status_code == 200:
+                content_type = (r.headers.get('content-type') or '').lower()
+                if ext == ".png":
+                    if 'pdf' in content_type: ext = ".pdf"
+                    elif 'svg' in content_type: ext = ".svg"
+                    elif 'postscript' in content_type or 'illustrator' in content_type: ext = ".ai"
+                    if ext != ".png":
+                        path = os.path.join(TEMP_DOWNLOAD_DIR, f"{filename_prefix}{ext}")
                 with open(path, 'wb') as f: shutil.copyfileobj(r.raw, f)
+                print(f"   > Downloaded: {os.path.basename(path)} ({r.status_code})")
                 return path
-    except: pass
+            print(f"   > Download failed ({r.status_code}): {url_or_base64[:120]}")
+    except Exception as e:
+        print(f"   > Download error for {str(url_or_base64)[:120]}: {e}")
     return None
 def vec_single(d: Dict, f: str, id: str, sec: str) -> Optional[str]:
     if not d.get('exists'): return None
@@ -838,7 +858,9 @@ if __name__ == "__main__":
                 create_and_run_merge_script(generated_files, final_pdf, full_data)
             else:
                 print("No files created.")
+                sys.exit(1)
         except Exception as e:
             print(f"Error: {e}")
             import traceback
             traceback.print_exc()
+            sys.exit(1)

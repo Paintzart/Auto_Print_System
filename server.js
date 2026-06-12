@@ -131,6 +131,7 @@ function saveBase64Image(base64Str, prefix) {
         if (type.includes('jpeg') || type.includes('jpg')) ext = '.jpg';
         if (type.includes('pdf')) ext = '.pdf';
         if (type.includes('svg')) ext = '.svg';
+        if (type.includes('illustrator') || type.includes('postscript')) ext = '.ai';
         const fileName = `${prefix}_${Date.now()}${ext}`;
         const filePath = path.join(TEMP_DIR, fileName);
         fs.writeFileSync(filePath, buffer);
@@ -193,11 +194,86 @@ function runSingleSimulation(payloadForPython) {
         });
     });
 }
-function mapVariableLocation(loc, prefix) {
+function isBlobUrl(value) {
+    return typeof value === 'string' && value.startsWith('blob:');
+}
+
+function collectBlobUrls(value, path = '') {
+    const found = [];
+    if (value == null) return found;
+    if (typeof value === 'string') {
+        if (isBlobUrl(value)) found.push(path || '(root)');
+        return found;
+    }
+    if (Array.isArray(value)) {
+        value.forEach((item, i) => {
+            found.push(...collectBlobUrls(item, `${path}[${i}]`));
+        });
+        return found;
+    }
+    if (typeof value === 'object') {
+        for (const [key, nested] of Object.entries(value)) {
+            const nextPath = path ? `${path}.${key}` : key;
+            found.push(...collectBlobUrls(nested, nextPath));
+        }
+    }
+    return found;
+}
+
+function getTemplateRaw(loc) {
+    if (!loc) return null;
+    let raw =
+        loc.template_base64 || loc.templateBase64 ||
+        loc.template_url || loc.templateUrl ||
+        loc.template_file || loc.templateFile;
+    if (!raw && Array.isArray(loc.variants) && loc.variants.length > 0) {
+        const first = loc.variants[0] || {};
+        raw =
+            first.template_base64 || first.templateBase64 ||
+            first.template_url || first.templateUrl;
+    }
+    if (!raw || typeof raw !== 'string') return null;
+    // base64 גolmi בלי data: prefix
+    if (
+        !raw.startsWith('data:') &&
+        !raw.startsWith('http') &&
+        !raw.startsWith('blob:') &&
+        !raw.includes('://') &&
+        raw.length > 80
+    ) {
+        return `data:application/postscript;base64,${raw}`;
+    }
+    return raw;
+}
+
+async function resolveDownloadUrl(raw) {
+    if (!raw) return null;
+    if (isBlobUrl(raw)) return null;
+    if (raw.startsWith('data:')) return raw;
+    if (raw.includes('r2.cloudflarestorage.com')) {
+        return await getR2SignedUrl(raw);
+    }
+    try {
+        return decodeURIComponent(raw);
+    } catch (e) {
+        return raw;
+    }
+}
+
+async function resolveStoredFileUrl(raw, savePrefix) {
+    if (!raw) return null;
+    if (isBlobUrl(raw)) return null;
+    if (raw.startsWith('data:')) return saveBase64Image(raw, savePrefix);
+    return await resolveDownloadUrl(raw);
+}
+
+async function mapVariableLocation(loc, prefix) {
     if (!loc) return { exists: false };
     const isVariable = loc.variable_print || loc.variablePrint || (Array.isArray(loc.variants) && loc.variants.length > 0);
     if (isVariable) {
-        const variants = (loc.variants || []).map((v, i) => {
+        const variants = [];
+        for (let i = 0; i < (loc.variants || []).length; i++) {
+            const v = loc.variants[i];
             const idx = v.index != null ? v.index : i + 1;
             const out = {
                 index: idx,
@@ -205,19 +281,46 @@ function mapVariableLocation(loc, prefix) {
                 req_color_hebrew: v.req_color_hebrew || v.reqColorHebrew || loc.req_color_hebrew || loc.reqColorHebrew,
                 no_vectorization: v.no_vectorization ?? v.noVectorization ?? loc.no_vectorization ?? loc.noVectorization ?? false,
                 text_overrides: v.text_overrides || v.textOverrides || {},
+                image_overrides: {},
             };
             if (v.file_url || v.fileUrl) {
                 const raw = v.file_url || v.fileUrl;
-                out.file_url = raw.startsWith('data:') ? saveBase64Image(raw, `${prefix}_var_${idx}`) : raw;
+                out.file_url = await resolveStoredFileUrl(raw, `${prefix}_var_${idx}`);
             }
-            return out;
-        });
+            const imgOverrides = v.image_overrides || v.imageOverrides || {};
+            for (const [imgName, imgUrl] of Object.entries(imgOverrides)) {
+                if (!imgUrl) continue;
+                out.image_overrides[imgName] = await resolveStoredFileUrl(
+                    imgUrl,
+                    `${prefix}_var_${idx}_${imgName}`
+                );
+            }
+            variants.push(out);
+        }
+        let templateRaw = getTemplateRaw(loc);
+        const hasTemplate = !!templateRaw && !isBlobUrl(templateRaw);
+        let templateUrl = null;
+        if (hasTemplate) {
+            templateUrl = await resolveStoredFileUrl(templateRaw, `${prefix}_template`);
+        }
+        if (templateRaw && isBlobUrl(templateRaw)) {
+            console.warn(`   ⚠ template ${prefix}: blob URL is not supported by the server`);
+        } else if (hasTemplate && templateUrl) {
+            console.log(`   > template ${prefix}: ${String(templateUrl).slice(0, 120)}`);
+        } else if (hasTemplate && !templateUrl) {
+            console.warn(`   ⚠ template ${prefix}: could not store template file`);
+        } else if (loc.template_mode || loc.templateMode) {
+            console.warn(`   ⚠ template_mode=true on ${prefix} but no template_url – falling back to file mode`);
+        }
         return {
             exists: true,
             variable_print: true,
             req_color_hebrew: loc.req_color_hebrew || loc.reqColorHebrew,
             category: loc.category || 'A4',
             no_vectorization: loc.no_vectorization ?? loc.noVectorization ?? false,
+            template_url: templateUrl,
+            template_mode: hasTemplate && !!templateUrl ? (loc.template_mode ?? loc.templateMode ?? true) : false,
+            outline_text: loc.outline_text ?? loc.outlineText ?? true,
             variants,
         };
     }
@@ -241,17 +344,18 @@ function mapProductForSimulation(prod, index) {
     };
 }
 
-function mapProductForVariable(prod) {
+async function mapProductForVariable(prod) {
     const loc = prod.locations || {};
+    const side = (name) => loc[name] || prod[name];
     return {
         item_index: prod.item_index || '1',
         product_type: prod.product_type,
         product_color_hebrew: prod.product_color_hebrew,
         extra_colors_hebrew: prod.extra_colors_hebrew || [],
-        front: mapVariableLocation(loc.front, 'front'),
-        back: mapVariableLocation(loc.back, 'back'),
-        right_sleeve: mapVariableLocation(loc.right_sleeve, 'right'),
-        left_sleeve: mapVariableLocation(loc.left_sleeve, 'left'),
+        front: await mapVariableLocation(side('front'), 'front'),
+        back: await mapVariableLocation(side('back'), 'back'),
+        right_sleeve: await mapVariableLocation(side('right_sleeve'), 'right'),
+        left_sleeve: await mapVariableLocation(side('left_sleeve'), 'left'),
     };
 }
 
@@ -295,8 +399,21 @@ app.post('/run-variable-simulation', async (req, res) => {
     if (!products || products.length !== 1) {
         return res.status(400).json({ success: false, message: "נדרש בדיוק מוצר 1" });
     }
+    const blobPaths = collectBlobUrls(products[0]);
+    if (blobPaths.length > 0) {
+        console.warn(`   ⚠ blob URLs detected: ${blobPaths.join(', ')}`);
+        return res.status(400).json({
+            success: false,
+            message: 'blob: URL לא נתמך בשרת. המר את קובץ התבנית ל-base64 לפני השליחה.',
+            blob_fields: blobPaths,
+            fix: {
+                template_base64: 'data:application/postscript;base64,...',
+                note: 'במקום template_url: blob:... שלח locations.front.template_base64',
+            },
+        });
+    }
     try {
-        const prod = mapProductForVariable(products[0]);
+        const prod = await mapProductForVariable(products[0]);
         const hasVariable = ['front', 'back', 'right_sleeve', 'left_sleeve'].some(
             (s) => prod[s]?.variable_print
         );
