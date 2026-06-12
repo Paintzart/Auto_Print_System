@@ -47,13 +47,19 @@ async function getR2SignedUrl(originalUrl) {
 // === כפתור ורוד ===
 // Body: orderId, fileUrl, thickness, products (מהמסך), white_print_locations (מערך מ־getWhitePrintLocations).
 // white_print_locations: רק מיקומים עם הדפס לבן, למשל [ { product: "1", location: "front" }, { product: "1", location: "left_sleeve" } ].
+// thickness_mode: "uniform" (ברירת מחדל – אותו עובי לכולם) | "per_location" (עובי לפי מוצר/צד).
+// logo_thicknesses: כש־per_location – מערך { product, location, thickness, variant_index? }.
+// thickness נשאר ברירת מחדל לכל מיקום שלא מופיע ב-logo_thicknesses.
 // אם ריק [] – לא כותבים קובץ ולא מעבירים ארגומנט; הפייתון יריץ זיהוי אוטומטי.
 app.post('/prepare-print', async (req, res) => {
-    let { orderId, fileUrl, thickness, white_print_locations, whitePrintLocations, front_print_2pocket, frontPrint2Pocket, item_quantities, itemQuantities } = req.body;
+    let { orderId, fileUrl, thickness, white_print_locations, whitePrintLocations, front_print_2pocket, frontPrint2Pocket, item_quantities, itemQuantities, thickness_mode, thicknessMode, logo_thicknesses, logoThicknesses } = req.body;
     // תמיכה גם ב־camelCase מהקליינט
     const listFromBody = white_print_locations ?? whitePrintLocations;
     const front2Pocket = front_print_2pocket ?? frontPrint2Pocket ?? false;
-    console.log(`\n🌸 בקשה להכנת דפוס: הזמנה ${orderId}${front2Pocket ? ' (הדפס קידמי 2Pocket – A4 לרוחב)' : ''}`);
+    const thicknessModeVal = String(thickness_mode ?? thicknessMode ?? 'uniform').toLowerCase();
+    const logoThicknessList = logo_thicknesses ?? logoThicknesses ?? [];
+    const hasPerLocationThickness = thicknessModeVal === 'per_location';
+    console.log(`\n🌸 בקשה להכנת דפוס: הזמנה ${orderId}${front2Pocket ? ' (הדפס קידמי 2Pocket – A4 לרוחב)' : ''}${hasPerLocationThickness ? ' (עובי לוגו לפי מוצר/צד)' : ''}`);
     // דיבוג: מה התקבל ב־white_print_locations
     const hasList = listFromBody != null && Array.isArray(listFromBody) && listFromBody.length > 0;
     console.log(`   [דיבוג] white_print_locations: ${listFromBody == null ? 'לא נשלח' : Array.isArray(listFromBody) ? `מערך באורך ${listFromBody.length}` : typeof listFromBody}`);
@@ -82,14 +88,17 @@ app.post('/prepare-print', async (req, res) => {
         const payload = {
             white_print_locations: hasList ? listFromBody : [],
             front_print_2pocket: front2Pocket,
-            item_quantities: hasItemQty ? itemQtyList : []
+            item_quantities: hasItemQty ? itemQtyList : [],
+            thickness_mode: thicknessModeVal,
+            logo_thicknesses: hasPerLocationThickness && Array.isArray(logoThicknessList) ? logoThicknessList : [],
         };
-        if (hasList || front2Pocket || hasItemQty) {
+        if (hasList || front2Pocket || hasItemQty || hasPerLocationThickness) {
             orderPayloadPath = path.join(TEMP_DIR, `order_${orderId}_${Date.now()}_payload.json`);
             fs.writeFileSync(orderPayloadPath, JSON.stringify(payload), 'utf8');
             if (hasList) console.log(`   > רשימת הדפס לבן: ${listFromBody.length} מיקומים, קובץ: ${orderPayloadPath}`);
             if (front2Pocket) console.log(`   > הדפס קידמי 2Pocket (A4 לרוחב) – כפתור סגול`);
             if (hasItemQty) console.log(`   > כמויות פריטים: ${itemQtyList.length} מיקומים`);
+            if (hasPerLocationThickness) console.log(`   > עובי לוגו לפי מיקום: ${Array.isArray(logoThicknessList) ? logoThicknessList.length : 0} הגדרות, ברירת מחדל ${thickness || '2px'}`);
         } else {
             console.log(`   > אין רשימת הדפס לבן – יורץ זיהוי אוטומטי`);
         }
@@ -184,6 +193,68 @@ function runSingleSimulation(payloadForPython) {
         });
     });
 }
+function mapVariableLocation(loc, prefix) {
+    if (!loc) return { exists: false };
+    const isVariable = loc.variable_print || loc.variablePrint || (Array.isArray(loc.variants) && loc.variants.length > 0);
+    if (isVariable) {
+        const variants = (loc.variants || []).map((v, i) => {
+            const idx = v.index != null ? v.index : i + 1;
+            const out = {
+                index: idx,
+                label: v.label || null,
+                req_color_hebrew: v.req_color_hebrew || v.reqColorHebrew || loc.req_color_hebrew || loc.reqColorHebrew,
+                no_vectorization: v.no_vectorization ?? v.noVectorization ?? loc.no_vectorization ?? loc.noVectorization ?? false,
+                text_overrides: v.text_overrides || v.textOverrides || {},
+            };
+            if (v.file_url || v.fileUrl) {
+                const raw = v.file_url || v.fileUrl;
+                out.file_url = raw.startsWith('data:') ? saveBase64Image(raw, `${prefix}_var_${idx}`) : raw;
+            }
+            return out;
+        });
+        return {
+            exists: true,
+            variable_print: true,
+            req_color_hebrew: loc.req_color_hebrew || loc.reqColorHebrew,
+            category: loc.category || 'A4',
+            no_vectorization: loc.no_vectorization ?? loc.noVectorization ?? false,
+            variants,
+        };
+    }
+    return mapSimulationLocation(loc);
+}
+
+function mapProductForSimulation(prod, index) {
+    maybeSaveLocationFile(prod.locations?.front, `front_${index}`);
+    maybeSaveLocationFile(prod.locations?.back, `back_${index}`);
+    maybeSaveLocationFile(prod.locations?.right_sleeve, `right_${index}`);
+    maybeSaveLocationFile(prod.locations?.left_sleeve, `left_${index}`);
+    return {
+        item_index: prod.item_index,
+        product_type: prod.product_type,
+        product_color_hebrew: prod.product_color_hebrew,
+        extra_colors_hebrew: prod.extra_colors_hebrew || [],
+        front: mapSimulationLocation(prod.locations?.front),
+        back: mapSimulationLocation(prod.locations?.back),
+        right_sleeve: mapSimulationLocation(prod.locations?.right_sleeve),
+        left_sleeve: mapSimulationLocation(prod.locations?.left_sleeve),
+    };
+}
+
+function mapProductForVariable(prod) {
+    const loc = prod.locations || {};
+    return {
+        item_index: prod.item_index || '1',
+        product_type: prod.product_type,
+        product_color_hebrew: prod.product_color_hebrew,
+        extra_colors_hebrew: prod.extra_colors_hebrew || [],
+        front: mapVariableLocation(loc.front, 'front'),
+        back: mapVariableLocation(loc.back, 'back'),
+        right_sleeve: mapVariableLocation(loc.right_sleeve, 'right'),
+        left_sleeve: mapVariableLocation(loc.left_sleeve, 'left'),
+    };
+}
+
 // === כפתור סגול: הדמיה ===
 // === כפתור סגול: הדמיה (התיקון לאיחוד הקבצים) ===
 app.post('/run-simulation', async (req, res) => {
@@ -198,22 +269,7 @@ app.post('/run-simulation', async (req, res) => {
         for (let i = 0; i < products.length; i++) {
             const prod = products[i];
             console.log(`\n--- מעבד מוצר ${i + 1} ---`);
-            // שמירת תמונות כבדות — לא נדרש כשיש reuse_print_from
-            maybeSaveLocationFile(prod.locations.front, `front_${i}`);
-            maybeSaveLocationFile(prod.locations.back, `back_${i}`);
-            maybeSaveLocationFile(prod.locations.right_sleeve, `right_${i}`);
-            maybeSaveLocationFile(prod.locations.left_sleeve, `left_${i}`);
-            // הוספת המוצר לרשימה (במקום לשלוח לפייתון מיד!)
-            processedProducts.push({
-                item_index: prod.item_index,
-                product_type: prod.product_type,
-                product_color_hebrew: prod.product_color_hebrew,
-                extra_colors_hebrew: prod.extra_colors_hebrew || [],
-                front: mapSimulationLocation(prod.locations.front),
-                back: mapSimulationLocation(prod.locations.back),
-                right_sleeve: mapSimulationLocation(prod.locations.right_sleeve),
-                left_sleeve: mapSimulationLocation(prod.locations.left_sleeve)
-            });
+            processedProducts.push(mapProductForSimulation(prod, i));
         }
         // 2. הכנת המידע המלא לפייתון (כל המוצרים יחד)
         const fullBatchData = {
@@ -231,6 +287,38 @@ app.post('/run-simulation', async (req, res) => {
         res.status(500).json({ success: false, message: "שגיאה בעיבוד" });
     }
 });
+
+// === כפתור כתום: הדמיה + הדפס משתנה (מוצר 1) ===
+app.post('/run-variable-simulation', async (req, res) => {
+    const { order_id, products, simulation_ad, is_wholesale } = req.body;
+    console.log(`\n🟠 בקשה להדמיה משתנה: הזמנה ${order_id}`);
+    if (!products || products.length !== 1) {
+        return res.status(400).json({ success: false, message: "נדרש בדיוק מוצר 1" });
+    }
+    try {
+        const prod = mapProductForVariable(products[0]);
+        const hasVariable = ['front', 'back', 'right_sleeve', 'left_sleeve'].some(
+            (s) => prod[s]?.variable_print
+        );
+        if (!hasVariable) {
+            return res.status(400).json({ success: false, message: "לא נמצא variable_print באף צד" });
+        }
+        const fullBatchData = {
+            mode: 'variable',
+            order_id,
+            products: [prod],
+            simulation_ad: simulation_ad || { enabled: false, mode: 'random', selected_products: [] },
+            is_wholesale: is_wholesale || false,
+        };
+        await runSingleSimulation(fullBatchData);
+        console.log("\n✅ הדמיה משתנה הסתיימה בהצלחה!");
+        res.json({ success: true, message: "ההדמיה וההדפסים המשתנים מוכנים" });
+    } catch (error) {
+        console.error("❌ תקלה (כתום):", error);
+        res.status(500).json({ success: false, message: "שגיאה בעיבוד הדפס משתנה" });
+    }
+});
+
 // === טעינת תיקיית ההדפסה מ-config (לשימוש ב-/download) ===
 function getPrintFolderPath() {
     try {

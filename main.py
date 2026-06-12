@@ -8,6 +8,7 @@ import shutil
 import sys
 import json
 import base64, difflib, re
+import time
 import win32com.client
 import pythoncom
 import requests
@@ -15,7 +16,7 @@ from typing import Dict, Any, Optional
 # הגדרת קידוד
 sys.stdout.reconfigure(encoding='utf-8')
 # ייבוא הפונקציות הגרפיות
-from illustrator_ops import run_jsx, open_and_color_template, place_and_simulate_print, update_size_label, delete_side_assets, delete_print_layer_only, save_pdf, clean_layout, apply_extra_colors, delete_information_layer, set_order_number_in_simulation, remove_order_number_from_simulation
+from illustrator_ops import run_jsx, open_and_color_template, place_and_simulate_print, update_size_label, delete_side_assets, delete_print_layer_only, save_pdf, clean_layout, apply_extra_colors, delete_information_layer, set_order_number_in_simulation, remove_order_number_from_simulation, close_all_illustrator_documents, VARIABLE_PRINT_COLS, VARIABLE_PRINT_GAP_MIN
 from vectorizer_ops import convert_to_svg
 # --- הגדרות ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -543,21 +544,37 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
     jsx_content = f"""
     #target illustrator
     var files = {json.dumps(js_files)};
+    function openFileSafe(path) {{
+        var f = new File(path);
+        if (!f.exists) throw new Error("File not found: " + path);
+        var target = f.fsName.toLowerCase();
+        for (var d = 0; d < app.documents.length; d++) {{
+            try {{
+                if (app.documents[d].fullName && app.documents[d].fullName.fsName.toLowerCase() === target) {{
+                    return app.documents[d];
+                }}
+            }} catch(e) {{}}
+        }}
+        return app.open(f);
+    }}
     function main() {{
         if (files.length === 0) return;
         app.userInteractionLevel = UserInteractionLevel.DONTDISPLAYALERTS;
         var maxWidth = 0; var maxHeight = 0;
         for (var i = 0; i < files.length; i++) {{
-            var tempDoc = app.open(new File(files[i]));
+            var tempDoc = openFileSafe(files[i]);
             var m = calculateLayoutMetrics(tempDoc);
             if (m.width > maxWidth) maxWidth = m.width;
             if (m.height > maxHeight) maxHeight = m.height;
             tempDoc.close(SaveOptions.DONOTSAVECHANGES);
         }}
-        var STEP_X = maxWidth + 150;
-        var STEP_Y = maxHeight + 250;
-        var COLS = 4;
-        var masterDoc = app.open(new File(files[0]));
+        var GAP_X = {int(VARIABLE_PRINT_GAP_MIN)};
+        var GAP_Y = {int(VARIABLE_PRINT_GAP_MIN + 100)};
+        var STEP_X = maxWidth + GAP_X;
+        var STEP_Y = maxHeight + GAP_Y;
+        var COLS = {int(VARIABLE_PRINT_COLS)};
+        $.writeln("Merge grid: " + files.length + " products, STEP_X=" + STEP_X + " STEP_Y=" + STEP_Y + " COLS=" + COLS);
+        var masterDoc = openFileSafe(files[0]);
         organizeMasterContent(masterDoc);
         for (var j = 1; j < files.length; j++) {{
             var col = j % COLS;
@@ -644,7 +661,7 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
         }}
     }}
     function processNextFileFast(masterDoc, srcPath, layerName, offX, offY) {{
-        var srcDoc = app.open(new File(srcPath));
+        var srcDoc = openFileSafe(srcPath);
         var abData = [];
         for(var i=0; i<srcDoc.artboards.length; i++) abData.push({{rect: srcDoc.artboards[i].artboardRect, name: srcDoc.artboards[i].name}});
         masterDoc.activate();
@@ -682,8 +699,14 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
         print(f"\n🔍 DEBUG: About to run merge script...")
         print(f"🔍 DEBUG: Script path: {script_path}")
         print(f"🔍 DEBUG: Files to merge: {files_list}")
+        for fp in files_list:
+            if not os.path.exists(fp):
+                raise FileNotFoundError(f"Merge input missing: {fp}")
+            print(f"🔍 DEBUG: File OK: {fp} ({os.path.getsize(fp)} bytes)")
         app = win32com.client.Dispatch("Illustrator.Application")
         print(f"🔍 DEBUG: Illustrator app connected")
+        close_all_illustrator_documents(app)
+        time.sleep(0.5)
         print(f"🔍 DEBUG: Running JavaScript file...")
         app.DoJavaScriptFile(script_path)
         print(f"🔍 DEBUG: JavaScript file executed")
@@ -746,12 +769,13 @@ if __name__ == "__main__":
         try:
             # טעינת הנתונים שהגיעו מהקריאה
             full_data = json.loads(sys.argv[1])
+            mode = full_data.get("mode", "standard")
             # שלב 1: חילוץ מספר הזמנה מהנתונים האמיתיים (לא משתנה קבוע)
             raw_order_id = str(full_data.get('order_id', '0000')).strip()
             # לקיחת 4 ספרות אחרונות בלבד
             current_order_4 = raw_order_id[-4:]
             # הדפסה לבדיקה בטרמינל (תוכלי לראות מה הוא באמת מזהה)
-            print(f"DEBUG: Processing Order ID: {raw_order_id} | Final Name will be: {current_order_4}")
+            print(f"DEBUG: Processing Order ID: {raw_order_id} | Final Name will be: {current_order_4} | mode={mode}")
             products = full_data.get('products', [])
             # שלב 2: יצירת תיקיית פלט (לפי ה-4 ספרות)
             order_folder = os.path.join(ORDERS_ROOT_DIR, current_order_4)
@@ -775,17 +799,31 @@ if __name__ == "__main__":
             if is_wholesale:
                 print(f"   → השכבה 'information' תימחק מכל המוצרים")
             print(f"{'='*50}\n")
-            side_cache = {}
-            download_all_side_files(products, current_order_4)
-            for i, prod in enumerate(products):
-                ai_file = process_single_product_to_temp(
-                    prod, i, order_folder, is_wholesale,
-                    order_id=raw_order_id, products_all=products, side_cache=side_cache
-                )
-                if ai_file:
-                    generated_files.append(ai_file)
+            if mode == "variable":
+                from variable_print import download_variable_product_files, process_variable_product_to_temp
+
+                if len(products) != 1:
+                    print("⚠️ Variable mode requires exactly 1 product")
                 else:
-                    print(f"⚠️ Product {i+1} skipped – not included in merge")
+                    prod = products[0]
+                    download_variable_product_files(prod, current_order_4)
+                    ai_file = process_variable_product_to_temp(
+                        prod, order_folder, is_wholesale, order_id=raw_order_id
+                    )
+                    if ai_file:
+                        generated_files.append(ai_file)
+            else:
+                side_cache = {}
+                download_all_side_files(products, current_order_4)
+                for i, prod in enumerate(products):
+                    ai_file = process_single_product_to_temp(
+                        prod, i, order_folder, is_wholesale,
+                        order_id=raw_order_id, products_all=products, side_cache=side_cache
+                    )
+                    if ai_file:
+                        generated_files.append(ai_file)
+                    else:
+                        print(f"⚠️ Product {i+1} skipped – not included in merge")
             print(f"\n📊 Merge input: {len(generated_files)}/{len(products)} products")
             # שלב 4: איחוד לקובץ PDF סופי
             if generated_files:

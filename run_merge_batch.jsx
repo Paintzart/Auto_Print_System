@@ -1,12 +1,25 @@
 
     #target illustrator
     var files = ["C:/Users/yarde/OneDrive/Desktop/Auto_Print_System/temp_ai_files/temp_0.ai"];
+    function openFileSafe(path) {
+        var f = new File(path);
+        if (!f.exists) throw new Error("File not found: " + path);
+        var target = f.fsName.toLowerCase();
+        for (var d = 0; d < app.documents.length; d++) {
+            try {
+                if (app.documents[d].fullName && app.documents[d].fullName.fsName.toLowerCase() === target) {
+                    return app.documents[d];
+                }
+            } catch(e) {}
+        }
+        return app.open(f);
+    }
     function main() {
         if (files.length === 0) return;
         app.userInteractionLevel = UserInteractionLevel.DONTDISPLAYALERTS;
         var maxWidth = 0; var maxHeight = 0;
         for (var i = 0; i < files.length; i++) {
-            var tempDoc = app.open(new File(files[i]));
+            var tempDoc = openFileSafe(files[i]);
             var m = calculateLayoutMetrics(tempDoc);
             if (m.width > maxWidth) maxWidth = m.width;
             if (m.height > maxHeight) maxHeight = m.height;
@@ -15,7 +28,7 @@
         var STEP_X = maxWidth + 150;
         var STEP_Y = maxHeight + 250;
         var COLS = 4;
-        var masterDoc = app.open(new File(files[0]));
+        var masterDoc = openFileSafe(files[0]);
         organizeMasterContent(masterDoc);
         for (var j = 1; j < files.length; j++) {
             var col = j % COLS;
@@ -102,7 +115,7 @@
         }
     }
     function processNextFileFast(masterDoc, srcPath, layerName, offX, offY) {
-        var srcDoc = app.open(new File(srcPath));
+        var srcDoc = openFileSafe(srcPath);
         var abData = [];
         for(var i=0; i<srcDoc.artboards.length; i++) abData.push({rect: srcDoc.artboards[i].artboardRect, name: srcDoc.artboards[i].name});
         masterDoc.activate();

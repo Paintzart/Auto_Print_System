@@ -1,5 +1,7 @@
 import sys
 import os
+import re
+import math
 import win32com.client
 import time
 import json
@@ -137,8 +139,19 @@ createSimSummary();
 # 1. סקריפטים של JSX (לוגיקה פנימית של Adobe)
 # ========================================================
 def get_layer_suffix(layer_name):
-    """מזהה את הסיומת רק ל-4 הסוגים המותרים"""
+    """מזהה את הסיומת – כולל הדפס משתנה (Print_Back_1 → PB_1)"""
     name = layer_name.lower()
+    var_match = re.search(r"print_(front|back|right_sleeve|left_sleeve)_(\d+)", name)
+    if var_match:
+        side_key = var_match.group(1)
+        idx = var_match.group(2)
+        side_map = {
+            "front": "PF",
+            "back": "PB",
+            "right_sleeve": "PR",
+            "left_sleeve": "PL",
+        }
+        return f"{side_map[side_key]}_{idx}"
     # זיהוי מדויק לפי סדר חשיבות
     if "front" in name: return "PF"
     if "back" in name: return "PB"
@@ -155,6 +168,82 @@ LOCATION_TO_SUFFIX = {
     "right_sleeve": "PR",  # שרוול ימין
     "left_sleeve": "PL",   # שרוול שמאל
 }
+
+def parse_thickness_value(val):
+    if val is None:
+        return None
+    return int(str(val).replace("px", "").strip())
+
+def build_thickness_map(logo_thicknesses):
+    """מיפוי (מוצר, סיומת) -> עובי כיווץ בפיקסלים (0/1/2)"""
+    thickness_map = {}
+    if not isinstance(logo_thicknesses, list):
+        return thickness_map
+    for entry in logo_thicknesses:
+        prod = str(entry.get("product") or entry.get("prod_idx") or "")
+        loc = str(entry.get("location") or "").strip().lower()
+        raw = entry.get("thickness") if entry.get("thickness") is not None else entry.get("contract_px")
+        if not prod or not loc or raw is None:
+            continue
+        base_suffix = LOCATION_TO_SUFFIX.get(loc)
+        if not base_suffix:
+            continue
+        variant_idx = entry.get("variant_index") or entry.get("variantIndex")
+        if variant_idx is not None:
+            suffix = f"{base_suffix}_{int(variant_idx)}"
+        else:
+            suffix = base_suffix
+        px = parse_thickness_value(raw)
+        if px is not None:
+            thickness_map[(prod, suffix)] = px
+    return thickness_map
+
+def _variant_suffixes_for_side(job_list, prod, base_suffix):
+    """מחזיר סיומות הדפס משתנה (PB_1, PB_2...) לפי job_list"""
+    variants = []
+    pattern = re.compile(rf"^{re.escape(base_suffix)}_(\d+)$")
+    for job in job_list:
+        if str(job["prod_idx"]) != str(prod):
+            continue
+        m = pattern.match(job["suffix"])
+        if m:
+            variants.append((int(m.group(1)), job["suffix"]))
+    variants.sort(key=lambda x: x[0])
+    return [s for _, s in variants]
+
+def build_quantity_map(item_quantities, job_list):
+    """מיפוי (מוצר, סיומת) -> כמות. הדפס משתנה: חלוקה אוטומטית לפי מספר variants."""
+    quantity_map = {}
+    side_totals = []  # (prod, base_suffix, total_qty)
+    if not isinstance(item_quantities, list):
+        return quantity_map
+    for iq in item_quantities:
+        prod = str(iq.get("product") or iq.get("prod_idx") or "")
+        loc = str(iq.get("location") or "").strip().lower()
+        qty = iq.get("quantity")
+        variant_idx = iq.get("variant_index") or iq.get("variantIndex")
+        if not prod or not loc or qty is None:
+            continue
+        base_suffix = LOCATION_TO_SUFFIX.get(loc)
+        if not base_suffix:
+            continue
+        if variant_idx is not None:
+            suffix = f"{base_suffix}_{int(variant_idx)}"
+            quantity_map[(prod, suffix)] = int(qty)
+        else:
+            side_totals.append((prod, base_suffix, int(qty)))
+    for prod, base_suffix, total_qty in side_totals:
+        variants = _variant_suffixes_for_side(job_list, prod, base_suffix)
+        if variants:
+            per = max(1, math.ceil(total_qty / len(variants)))
+            for suffix in variants:
+                if (prod, suffix) not in quantity_map:
+                    quantity_map[(prod, suffix)] = per
+            print(f"   [דיבוג] כמות {total_qty} ל-{base_suffix} מוצר {prod} → {len(variants)} הדפסים × {per}")
+        elif (prod, base_suffix) not in quantity_map:
+            quantity_map[(prod, base_suffix)] = total_qty
+    return quantity_map
+
 def get_simulation_sublayer(print_layer_name):
     """מחזיר את שם תת-השכבה בהדמיה לפי שם שכבות ההדפסה"""
     name = print_layer_name.lower()
@@ -876,6 +965,16 @@ def run_illustrator_split(source_file_path, order_number, output_folder, order_p
             suffix = get_layer_suffix(sub_layer.Name)
             if not suffix:
                 continue
+            # הדפס משתנה: שם השכבה = שם הארטבורד (Print_Back_1 וכו')
+            if re.search(r"_\d+$", sub_layer.Name):
+                target_artboard = sub_layer.Name
+                job_list.append({
+                    "prod_idx": prod_idx,
+                    "layer_name": sub_layer.Name,
+                    "artboard_target": target_artboard,
+                    "suffix": suffix,
+                })
+                continue
             # מצב 2Pocket: רק הדפס קידמי, חיפוש ארטבורד שמכיל "2Pocket" + A4 לרוחב
             if front_print_2pocket and suffix == "PF":
                 target_2pocket = None
@@ -952,15 +1051,7 @@ def run_illustrator_split(source_file_path, order_number, output_folder, order_p
             item_quantities = payload.get("item_quantities") or []
             if not isinstance(item_quantities, list):
                 item_quantities = []
-            # בניית מפת כמות לפי (מוצר, צד)
-            for iq in item_quantities:
-                prod = str(iq.get("product") or iq.get("prod_idx") or "")
-                loc = str(iq.get("location") or "").strip().lower()
-                qty = iq.get("quantity")
-                if prod and loc and qty is not None:
-                    suffix = LOCATION_TO_SUFFIX.get(loc)
-                    if suffix:
-                        quantity_map[(prod, suffix)] = int(qty)
+            quantity_map = build_quantity_map(item_quantities, job_list)
             print(f"   [דיבוג] נטען מ־payload: {len(white_print_locations)} מיקומי הדפס לבן, {len(quantity_map)} כמויות")
         except Exception as e:
             print(f"   [דיבוג] שגיאה בקריאת payload: {e}")
@@ -1008,9 +1099,14 @@ def run_illustrator_split(source_file_path, order_number, output_folder, order_p
                         if not prod:
                             continue
                         if location is not None and location != "":
-                            suffix = LOCATION_TO_SUFFIX.get(str(location).strip().lower())
-                            if not suffix:
+                            base_suffix = LOCATION_TO_SUFFIX.get(str(location).strip().lower())
+                            if not base_suffix:
                                 continue
+                            variant_idx = loc.get("variant_index") or loc.get("variantIndex")
+                            if variant_idx is not None:
+                                suffix = f"{base_suffix}_{int(variant_idx)}"
+                            else:
+                                suffix = base_suffix
                             layer_name = None
                             for j in job_list:
                                 if j["prod_idx"] == str(prod) and j["suffix"] == suffix:
@@ -1073,7 +1169,11 @@ def run_illustrator_split(source_file_path, order_number, output_folder, order_p
             pdf_opts.PDFPreset = "[Press Quality]"
             work_doc.SaveAs(final_pdf_path, pdf_opts)
             work_doc.Close(2)
-            files_created.append(final_pdf_path)
+            files_created.append({
+                "path": final_pdf_path,
+                "prod_idx": str(job["prod_idx"]),
+                "suffix": job["suffix"],
+            })
             print(f"   > Created: {final_pdf_name}")
         except Exception as e:
             print(f"Error processing job: {e}")
@@ -1083,7 +1183,7 @@ def run_illustrator_split(source_file_path, order_number, output_folder, order_p
             try: os.remove(temp_ai)
             except: pass
     return files_created
-def run_photoshop_processing(files_list, contract_px):
+def run_photoshop_processing(files_list, default_contract_px, thickness_map=None):
     pythoncom.CoInitialize()
     ps = None
     max_attempts = 5
@@ -1107,7 +1207,16 @@ def run_photoshop_processing(files_list, contract_px):
                 return
     if ps is None:
         return
-    for file_path in files_list:
+    thickness_map = thickness_map or {}
+    for entry in files_list:
+        if isinstance(entry, dict):
+            file_path = entry["path"]
+            prod_idx = str(entry.get("prod_idx", "1"))
+            suffix = entry.get("suffix", "")
+            contract_px = thickness_map.get((prod_idx, suffix), default_contract_px)
+        else:
+            file_path = entry
+            contract_px = default_contract_px
         # וידוא שהנתיב תקין עבור ווינדוס
         abs_path = os.path.abspath(file_path).replace("\\", "/")
         status_path = abs_path + ".status.txt"
@@ -1122,7 +1231,8 @@ def run_photoshop_processing(files_list, contract_px):
         jsx_file = os.path.join(os.path.dirname(file_path), "temp_ps_runner.jsx")
         with open(jsx_file, "w", encoding="utf-8") as f:
             f.write(jsx_code)
-        print(f"Sending to Photoshop: {os.path.basename(file_path)}")
+        px_label = f" ({contract_px}px)" if thickness_map else ""
+        print(f"Sending to Photoshop: {os.path.basename(file_path)}{px_label}")
         ps.DoJavaScript(f'$.evalFile("{jsx_file.replace(os.sep, "/")}")')
         # המתנה לסיום (הגדלתי את זמן ההמתנה ל-30 שניות)
         success = False
@@ -1211,6 +1321,19 @@ if __name__ == "__main__":
     if order_payload_path:
         print(f"   [דיבוג] קובץ קיים? {os.path.exists(order_payload_path)}")
     contract_px = int(thickness.replace("px", ""))
+    thickness_mode = "uniform"
+    thickness_map = {}
+    if order_payload_path and os.path.exists(order_payload_path):
+        try:
+            with open(order_payload_path, "r", encoding="utf-8") as f:
+                payload_main = json.load(f)
+            thickness_mode = (payload_main.get("thickness_mode") or payload_main.get("thicknessMode") or "uniform").lower()
+            logo_thicknesses = payload_main.get("logo_thicknesses") or payload_main.get("logoThicknesses") or []
+            if thickness_mode == "per_location":
+                thickness_map = build_thickness_map(logo_thicknesses)
+                print(f"   [דיבוג] עובי לוגו לפי מיקום: {len(thickness_map)} הגדרות, ברירת מחדל {contract_px}px")
+        except Exception as e:
+            print(f"   [דיבוג] שגיאה בקריאת עובי לוגו מ-payload: {e}")
     with open('config.json', 'r', encoding='utf-8') as f:
         config = json.load(f)
         output_base = config.get("print_folder_path", "C:/Temp/Print")
@@ -1223,5 +1346,9 @@ if __name__ == "__main__":
     # ---------------------------------------
     if generated:
         print("Step 2: Photoshop Processing...")
-        run_photoshop_processing(generated, contract_px)
+        run_photoshop_processing(
+            generated,
+            contract_px,
+            thickness_map if thickness_mode == "per_location" else None,
+        )
     print("Done.")
