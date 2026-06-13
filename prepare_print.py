@@ -211,6 +211,33 @@ def _variant_suffixes_for_side(job_list, prod, base_suffix):
     variants.sort(key=lambda x: x[0])
     return [s for _, s in variants]
 
+def resolve_white_print_layer_names(loc, job_list):
+    """שמות שכבות הדפס לצביעה ללבן — הדפס משתנה בלי variant_index → כל variants של אותו צד."""
+    prod = loc.get("product") or loc.get("prod_idx")
+    if not prod:
+        return []
+    explicit_layer = loc.get("layer") or loc.get("layer_name")
+    if explicit_layer:
+        return [str(explicit_layer)]
+    location = loc.get("location")
+    if location is None or location == "":
+        return []
+    base_suffix = LOCATION_TO_SUFFIX.get(str(location).strip().lower())
+    if not base_suffix:
+        return []
+    variant_idx = loc.get("variant_index") or loc.get("variantIndex")
+    if variant_idx is not None:
+        suffixes = [f"{base_suffix}_{int(variant_idx)}"]
+    else:
+        suffixes = _variant_suffixes_for_side(job_list, prod, base_suffix) or [base_suffix]
+    names = []
+    for suffix in suffixes:
+        for job in job_list:
+            if job["prod_idx"] == str(prod) and job["suffix"] == suffix:
+                names.append(job["layer_name"])
+                break
+    return names
+
 def build_quantity_map(item_quantities, job_list):
     """מיפוי (מוצר, סיומת) -> כמות. הדפס משתנה: חלוקה אוטומטית לפי מספר variants."""
     quantity_map = {}
@@ -1094,31 +1121,15 @@ def run_illustrator_split(source_file_path, order_number, output_folder, order_p
                     print(f"   > Recoloring to white by server list only ({len(white_print_locations)} location(s)), no color check.")
                     for loc in white_print_locations:
                         prod = loc.get("product") or loc.get("prod_idx")
-                        location = loc.get("location")
-                        layer_name = loc.get("layer") or loc.get("layer_name")
                         if not prod:
                             continue
-                        if location is not None and location != "":
-                            base_suffix = LOCATION_TO_SUFFIX.get(str(location).strip().lower())
-                            if not base_suffix:
-                                continue
-                            variant_idx = loc.get("variant_index") or loc.get("variantIndex")
-                            if variant_idx is not None:
-                                suffix = f"{base_suffix}_{int(variant_idx)}"
-                            else:
-                                suffix = base_suffix
-                            layer_name = None
-                            for j in job_list:
-                                if j["prod_idx"] == str(prod) and j["suffix"] == suffix:
-                                    layer_name = j["layer_name"]
-                                    break
-                        if not layer_name:
-                            continue
-                        jsx_one = JSX_RECOLOR_ONE_LAYER_WHITE.replace("%PROD_IDX%", str(prod)).replace("%LAYER_NAME%", str(layer_name))
-                        try:
-                            app.DoJavaScript(jsx_one)
-                        except Exception:
-                            pass
+                        layer_names = resolve_white_print_layer_names(loc, job_list)
+                        for layer_name in layer_names:
+                            jsx_one = JSX_RECOLOR_ONE_LAYER_WHITE.replace("%PROD_IDX%", str(prod)).replace("%LAYER_NAME%", str(layer_name))
+                            try:
+                                app.DoJavaScript(jsx_one)
+                            except Exception:
+                                pass
                     print(f"   > Server white-print recolor done.")
                 else:
                     # רשימה ריקה – זיהוי אוטומטי: בודקים שחור בהדפסה + לבן בהדמיה ורק אז צובעים.

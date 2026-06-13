@@ -19,11 +19,14 @@ from illustrator_ops import (
     outline_document_text,
     place_and_simulate_print,
     place_variable_template_variant,
+    refresh_template_side_colors,
     run_jsx,
     set_order_number_in_simulation,
     setup_variable_print_slots,
     update_size_label,
     variable_layer_and_artboard,
+    save_native_ai,
+    is_pdf_disguised_as_ai,
 )
 SIDE_KEYS = ["front", "back", "right_sleeve", "left_sleeve"]
 SIDE_TO_PREFIX = {"front": "F", "back": "B", "right_sleeve": "RS", "left_sleeve": "LS"}
@@ -47,6 +50,27 @@ def is_template_side(loc_data: Optional[Dict[str, Any]]) -> bool:
     if not loc_data.get("template_mode"):
         return False
     return bool(loc_data.get("template_file") or loc_data.get("template_url"))
+
+
+def _as_bool(val, default: bool = False) -> bool:
+    if val is None:
+        return default
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, str):
+        return val.strip().lower() in ("true", "1", "yes")
+    return bool(val)
+
+
+def _resolve_variant_colors(
+    variant: Dict[str, Any], loc: Dict[str, Any], h1: str
+) -> tuple[Optional[str], Optional[str]]:
+    from main import resolve_sim_and_print_colors
+
+    variant_req = variant.get("req_color_hebrew")
+    side_req = loc.get("req_color_hebrew")
+    req = variant_req if variant_req not in (None, "") else (side_req or "")
+    return resolve_sim_and_print_colors(req, h1)
 
 
 def normalize_variants(loc_data: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -215,6 +239,51 @@ def vectorize_variant(
     return vec_single(d, folder, API_ID, API_SECRET)
 
 
+def prepare_template_image_files(
+    variant: Dict[str, Any],
+    loc: Dict[str, Any],
+    side: str,
+    folder: str,
+) -> tuple[Dict[str, str], Dict[str, bool]]:
+    """IMG slots: vectorize like regular print unless no_vectorization."""
+    from main import API_ID, API_SECRET, vec_single
+
+    raw_files = variant.get("image_files") or {}
+    if not raw_files:
+        return {}, {}
+
+    no_vec = _as_bool(
+        variant.get("no_vectorization", loc.get("no_vectorization", False))
+    )
+    side_prefix = loc.get("prefix") or SIDE_TO_PREFIX.get(side, "F")
+    v_idx = variant.get("index", 1)
+    prepared: Dict[str, str] = {}
+    raster_flags: Dict[str, bool] = {}
+
+    for img_name, path in raw_files.items():
+        if not path or not os.path.exists(path):
+            print(f"   > Skip image {img_name}: missing file")
+            continue
+        safe_name = str(img_name).replace(" ", "_")
+        d = {
+            "exists": True,
+            "file": path,
+            "no_vectorization": no_vec,
+            "prefix": f"{side_prefix}_{v_idx}_{safe_name}",
+        }
+        processed = vec_single(d, folder, API_ID, API_SECRET)
+        if not processed or not os.path.exists(processed):
+            print(f"   > Skip image {img_name}: vectorization failed")
+            continue
+        key = str(img_name)
+        prepared[key] = processed
+        raster_flags[key] = bool(no_vec)
+        mode = "raster" if raster_flags[key] else "vector"
+        print(f"   > Image {key} ({mode}): {os.path.basename(processed)}")
+
+    return prepared, raster_flags
+
+
 def _should_outline_variable_order(order: Dict[str, Any], variable_sides: List[str]) -> bool:
     for side in variable_sides:
         loc = order.get(side) or {}
@@ -232,7 +301,7 @@ def _save_order_editable(doc, folder: str, order_id: str) -> Optional[str]:
     while os.path.exists(editable_path):
         editable_path = os.path.join(folder, f"{safe_id}_editable ({counter}).ai")
         counter += 1
-    doc.SaveAs(editable_path)
+    save_native_ai(doc, editable_path)
     print(f"   > Saved editable (live text): {editable_path}")
     return editable_path
 
@@ -246,10 +315,9 @@ def _process_template_variants(
     label: str,
     heb: str,
     order_prefix: str = "",
+    folder: str = "",
     defer_outline: bool = False,
 ) -> None:
-    from main import resolve_print_color
-
     variants = normalize_variants(loc)
     prefix = loc.get("prefix") or SIDE_TO_PREFIX.get(side, "F")
     side_req = loc.get("req_color_hebrew")
@@ -292,17 +360,19 @@ def _process_template_variants(
         slot_idx = vi + 1
         layer_name, artboard_name = variable_layer_and_artboard(side, slot_idx)
         req = variant.get("req_color_hebrew") or side_req
-        print_hex = resolve_print_color(req, h1) if req else None
-        if not print_hex:
-            print_hex = resolve_print_color(side_req, h1) if side_req else None
-        if not print_hex:
-            print_hex = resolve_print_color("", h1)
+        sim_hex, print_hex = _resolve_variant_colors(variant, loc, h1)
+        if sim_hex is None and print_hex is None:
+            print(f"   > {side} variant {v_idx}: צבעוני — original colors (sim + print)")
         text_overrides = normalize_text_overrides(
             variant.get("text_overrides") or variant.get("textOverrides") or {}
         )
-        image_files = variant.get("image_files") or {}
+        image_files, image_raster_flags = prepare_template_image_files(
+            variant, loc, side, folder
+        )
         template_path, is_shared = _resolve_variant_template_path(loc, variant, order_prefix, side)
-        print(f"   > {side} variant {v_idx} print color: {print_hex} (req={req or side_req})")
+        print(f"   > {side} variant {v_idx} colors: sim={sim_hex} print={print_hex} (req={req or side_req})")
+        if image_files:
+            print(f"   > {side} variant {v_idx} images: {list(image_files.keys())}")
         if text_overrides:
             print(f"   > {side} variant {v_idx} text: {text_overrides}")
         elif is_shared:
@@ -323,9 +393,10 @@ def _process_template_variants(
             prefix,
             text_overrides=text_overrides,
             image_files=image_files,
+            image_raster_flags=image_raster_flags,
             outline_text=outline_text,
             skip_simulation=not with_sim,
-            sim_hex=print_hex,
+            sim_hex=sim_hex,
             print_hex=print_hex,
             product_doc=doc,
             category=category,
@@ -352,7 +423,7 @@ def process_variable_product_to_temp(
         TEMPLATES,
         get_hex_smart,
         normalize_split_product_color,
-        resolve_print_color,
+        resolve_sim_and_print_colors,
         side_is_active,
         vec_single,
     )
@@ -409,10 +480,11 @@ def process_variable_product_to_temp(
                 continue
             prefix = loc.get("prefix") or SIDE_TO_PREFIX.get(side, "F")
             is_r = loc.get("no_vectorization", False)
-            fc = resolve_print_color(loc.get("req_color_hebrew"), h1)
-            cp = fc if fc != "#FFFFFF" else "#000000"
+            sim_hex, print_hex = resolve_sim_and_print_colors(
+                loc.get("req_color_hebrew") or "", h1
+            )
             w = place_and_simulate_print(
-                doc, app, svg, prefix, loc.get("category", "A4"), cp, fc, is_r
+                doc, app, svg, prefix, loc.get("category", "A4"), print_hex, sim_hex, is_r
             )
             label = loc.get("label") or SIDE_DEFAULTS.get(side, {}).get("label", "")
             heb = loc.get("heb") or SIDE_DEFAULTS.get(side, {}).get("heb", "")
@@ -426,7 +498,7 @@ def process_variable_product_to_temp(
 
             if is_template_side(loc):
                 _process_template_variants(
-                    app, doc, side, loc, h1, label, heb, order_prefix, defer_outline=True
+                    app, doc, side, loc, h1, label, heb, order_prefix, folder, defer_outline=True
                 )
                 continue
 
@@ -445,8 +517,7 @@ def process_variable_product_to_temp(
                 layer_name, artboard_name = variable_layer_and_artboard(side, slot_idx)
                 req = variant.get("req_color_hebrew") or side_req
                 is_r = variant.get("no_vectorization", loc.get("no_vectorization", False))
-                fc = resolve_print_color(req, h1)
-                cp = fc if fc != "#FFFFFF" else "#000000"
+                sim_hex, print_hex = resolve_sim_and_print_colors(req or "", h1)
                 with_sim = vi == 0
                 w = place_and_simulate_print(
                     doc,
@@ -454,8 +525,8 @@ def process_variable_product_to_temp(
                     svg,
                     prefix,
                     cat,
-                    cp,
-                    fc,
+                    print_hex,
+                    sim_hex,
                     is_r,
                     layer_name=layer_name,
                     artboard_name=artboard_name,
@@ -493,9 +564,22 @@ def process_variable_product_to_temp(
         _save_order_editable(doc, folder, order_id or "")
         if _should_outline_variable_order(order, variable_sides):
             outline_document_text(app)
+            for side in variable_sides:
+                loc = order.get(side, {}) or {}
+                if is_template_side(loc):
+                    refresh_template_side_colors(
+                        app,
+                        side,
+                        normalize_variants(loc),
+                        loc,
+                        h1,
+                        _resolve_variant_colors,
+                    )
 
         out_path = os.path.join(TEMP_AI_DIR, "temp_0.ai")
-        doc.SaveAs(out_path)
+        save_native_ai(doc, out_path)
+        if is_pdf_disguised_as_ai(out_path):
+            print(f"   ⚠ temp_0.ai saved as PDF wrapper — merge may fail")
         doc.Close(2)
         time.sleep(0.5)
         print(f"   > Saved variable product: {out_path}")

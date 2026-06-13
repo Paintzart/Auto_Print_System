@@ -16,7 +16,7 @@ from typing import Dict, Any, Optional
 # הגדרת קידוד
 sys.stdout.reconfigure(encoding='utf-8')
 # ייבוא הפונקציות הגרפיות
-from illustrator_ops import run_jsx, open_and_color_template, place_and_simulate_print, update_size_label, delete_side_assets, delete_print_layer_only, save_pdf, clean_layout, apply_extra_colors, delete_information_layer, set_order_number_in_simulation, remove_order_number_from_simulation, close_all_illustrator_documents, VARIABLE_PRINT_COLS, VARIABLE_PRINT_GAP_MIN
+from illustrator_ops import run_jsx, open_and_color_template, place_and_simulate_print, update_size_label, delete_side_assets, delete_print_layer_only, save_pdf, clean_layout, apply_extra_colors, delete_information_layer, set_order_number_in_simulation, remove_order_number_from_simulation, close_all_illustrator_documents, save_native_ai, is_pdf_disguised_as_ai, VARIABLE_PRINT_COLS, VARIABLE_PRINT_GAP_MIN
 from vectorizer_ops import convert_to_svg
 # --- הגדרות ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -90,6 +90,7 @@ TEMPLATES = {
 API_ID = "vkd2vcts24ywdpk"
 API_SECRET = "r20rqffqdcv6vj0ahukmiu9i8ma6ur4g0e1a5o9c7vugsoracpk8"
 EXTENDED_COLOR_MAP = {
+    'צבע אחיד': 'UNIFORM', 'אחיד': 'UNIFORM', 'uniform': 'UNIFORM', 'צבע אחיד (הדפס)': 'UNIFORM',
     'צבעוני': 'ORIGINAL', 'מקורי': 'ORIGINAL', 'ללא שינוי': 'ORIGINAL', 'צבעוני (ללא שינוי)': 'ORIGINAL',
     'שחור': '#000000', 'לבן': '#FFFFFF', 'אדום': '#cc2127', 'צהוב': '#fff200', 'כתום': '#f7941d',
     'זהב': '#FFD700', 'גולד': '#FFD700', 'כסף': '#C0C0C0', 'סילבר': '#C0C0C0', 'ברונזה': '#CD7F32',
@@ -140,18 +141,49 @@ def get_hex_smart(name, return_none_on_fail=False):
     if hex_from_code:
         return hex_from_code
     if name_clean in EXTENDED_COLOR_MAP: return EXTENDED_COLOR_MAP[name_clean]
+    # "צבע אחיד" must not fuzzy-match to "צבעוני" (different meaning: uniform ink vs keep colors)
+    if 'אחיד' in name_clean and 'צבעוני' not in name_clean:
+        return 'UNIFORM'
     matches = difflib.get_close_matches(name_clean, EXTENDED_COLOR_MAP.keys(), n=1, cutoff=0.5)
-    if matches: return EXTENDED_COLOR_MAP[matches[0]]
+    if matches:
+        matched = matches[0]
+        if matched == 'צבעוני' and 'אחיד' in name_clean:
+            return 'UNIFORM'
+        return EXTENDED_COLOR_MAP[matched]
     return None if return_none_on_fail else '#FFFFFF'
 def resolve_print_color(req, shirt):
     txt = str(req).strip() if req else ""
     found = get_hex_smart(txt, True)
-    if found == 'ORIGINAL': return None
-    if found: return found
+    if found == 'ORIGINAL':
+        return None
+    if found == 'UNIFORM':
+        return get_contrasting_print_color(shirt)
+    if found:
+        return found
     return get_contrasting_print_color(shirt)
+
+
+def resolve_sim_and_print_colors(req, shirt_h1) -> tuple[Optional[str], Optional[str]]:
+    """(sim_hex, print_hex) — צבעוני=מקורי | לבן=sim לבן print שחור | שאר צבעים=אותו hex בשניהם."""
+    txt = str(req).strip() if req else ""
+    if txt:
+        found = get_hex_smart(txt, True)
+        if found == "ORIGINAL":
+            return None, None
+        if found == "UNIFORM":
+            ink = get_contrasting_print_color(shirt_h1)
+        elif found:
+            ink = found
+        else:
+            ink = get_contrasting_print_color(shirt_h1)
+    else:
+        ink = get_contrasting_print_color(shirt_h1)
+    sim_hex = ink
+    print_hex = "#000000" if ink.upper() == "#FFFFFF" else ink
+    return sim_hex, print_hex
 def get_hex(name):
     val = get_hex_smart(name)
-    return val if val != 'ORIGINAL' else None
+    return val if val not in ('ORIGINAL', 'UNIFORM') else None
 
 def _is_gray_color_name(name: str) -> bool:
     n = name.strip()
@@ -453,7 +485,7 @@ def process_single_product_to_temp(order, idx, folder, is_wholesale=False, order
                 continue
             is_r = d.get('no_vectorization', False)
             fc = resolve_print_color(d.get('req_color_hebrew'), h1)
-            cp = fc if fc!='#FFFFFF' else '#000000'
+            cp = fc if fc != '#FFFFFF' else '#000000'
             prefix = d.get('prefix') or SIDE_TO_PREFIX.get(s, 'F')
             w = place_and_simulate_print(doc, app, svgs[s], prefix, d.get('category', 'A4'), cp, fc, is_r)
             label = d.get('label') or SIDE_DEFAULTS.get(s, {}).get('label', f'size_{s}')
@@ -496,7 +528,9 @@ def process_single_product_to_temp(order, idx, folder, is_wholesale=False, order
             delete_information_layer(app)
         out_name = f"temp_{idx}.ai"
         out_path = os.path.join(TEMP_AI_DIR, out_name)
-        doc.SaveAs(out_path)
+        save_native_ai(doc, out_path)
+        if is_pdf_disguised_as_ai(out_path):
+            print(f"   ⚠ Saved {out_name} still looks like PDF — merge may fail")
         doc.Close(2)
         print(f"   > Saved: {out_name}")
         return out_path
@@ -557,6 +591,23 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
     with open(os.path.join(BASE_DIR, "current_job.json"), "w", encoding="utf-8") as f:
         json.dump(job_config, f, ensure_ascii=False, indent=4)    # ------------------------------------------
     js_files = [f.replace("\\", "/") for f in files_list]
+    merge_open_dir = os.path.join(BASE_DIR, "temp_ai_files", "_merge_open")
+    os.makedirs(merge_open_dir, exist_ok=True)
+    local_merge_files = []
+    for fp in files_list:
+        src = os.path.abspath(fp)
+        base = os.path.basename(src)
+        if is_pdf_disguised_as_ai(src):
+            dst_name = base.replace(".ai", "_merge.pdf").replace(".AI", "_merge.pdf")
+            if dst_name == base:
+                dst_name = base + "_merge.pdf"
+            print(f"🔍 DEBUG: PDF-in-.ai detected — merge will open as {dst_name}")
+        else:
+            dst_name = base
+        dst = os.path.join(merge_open_dir, dst_name)
+        shutil.copy2(src, dst)
+        local_merge_files.append(dst.replace("\\", "/"))
+    js_files = local_merge_files
     sidebar_logic_path = os.path.join(BASE_DIR, "sidebar_logic.jsx").replace("\\", "/")
     sidebar_exists = os.path.exists(sidebar_logic_path)
     print(f"🔍 DEBUG: sidebar_logic.jsx exists: {sidebar_exists}")
@@ -564,6 +615,14 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
     jsx_content = f"""
     #target illustrator
     var files = {json.dumps(js_files)};
+    function fileLooksLikePdf(f) {{
+        try {{
+            if (!f.open("r")) return false;
+            var head = f.read(5);
+            f.close();
+            return head && String(head).indexOf("%PDF") === 0;
+        }} catch(e) {{ return false; }}
+    }}
     function openFileSafe(path) {{
         var f = new File(path);
         if (!f.exists) throw new Error("File not found: " + path);
@@ -575,7 +634,17 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
                 }}
             }} catch(e) {{}}
         }}
-        return app.open(f);
+        var isPdf = fileLooksLikePdf(f);
+        for (var attempt = 0; attempt < 3; attempt++) {{
+            try {{
+                return app.open(f);
+            }} catch(e) {{
+                if (attempt >= 2) {{
+                    throw new Error("open failed (" + (isPdf ? "pdf" : "ai") + "): " + e);
+                }}
+                try {{ $.sleep(800); }} catch(s) {{}}
+            }}
+        }}
     }}
     function main() {{
         if (files.length === 0) return;
@@ -722,6 +791,8 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
         for fp in files_list:
             if not os.path.exists(fp):
                 raise FileNotFoundError(f"Merge input missing: {fp}")
+            if is_pdf_disguised_as_ai(fp):
+                print(f"🔍 DEBUG: WARNING: {fp} is PDF-in-.ai — Illustrator open may fail")
             print(f"🔍 DEBUG: File OK: {fp} ({os.path.getsize(fp)} bytes)")
         app = win32com.client.Dispatch("Illustrator.Application")
         print(f"🔍 DEBUG: Illustrator app connected")

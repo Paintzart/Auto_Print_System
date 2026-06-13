@@ -47,6 +47,7 @@ async function getR2SignedUrl(originalUrl) {
 // === כפתור ורוד ===
 // Body: orderId, fileUrl, thickness, products (מהמסך), white_print_locations (מערך מ־getWhitePrintLocations).
 // white_print_locations: רק מיקומים עם הדפס לבן, למשל [ { product: "1", location: "front" }, { product: "1", location: "left_sleeve" } ].
+// הדפס משתנה: location בלי variant_index (למשל back) → כל Print_Back_1, Print_Back_2...; variant_index → variant בודד.
 // thickness_mode: "uniform" (ברירת מחדל – אותו עובי לכולם) | "per_location" (עובי לפי מוצר/צד).
 // logo_thicknesses: כש־per_location – מערך { product, location, thickness, variant_index? }.
 // thickness נשאר ברירת מחדל לכל מיקום שלא מופיע ב-logo_thicknesses.
@@ -293,6 +294,12 @@ async function mapVariableLocation(loc, prefix) {
                 out.image_overrides[imgName] = await resolveStoredFileUrl(
                     imgUrl,
                     `${prefix}_var_${idx}_${imgName}`
+                );
+            }
+            if (Object.keys(out.image_overrides).length > 0) {
+                console.log(
+                    `   > ${prefix} variant ${idx} IMG slots: ${Object.keys(out.image_overrides).join(', ')}`
+                    + (out.no_vectorization ? ' (no_vectorization)' : ' (vectorize)')
                 );
             }
             variants.push(out);

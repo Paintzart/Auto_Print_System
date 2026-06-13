@@ -1,6 +1,14 @@
 
     #target illustrator
-    var files = ["C:/Users/yarde/OneDrive/Desktop/Auto_Print_System/temp_ai_files/temp_0.ai"];
+    var files = ["C:/Users/yarde/OneDrive/Desktop/Auto_Print_System/temp_ai_files/_merge_open/temp_0_merge.pdf"];
+    function fileLooksLikePdf(f) {
+        try {
+            if (!f.open("r")) return false;
+            var head = f.read(5);
+            f.close();
+            return head && String(head).indexOf("%PDF") === 0;
+        } catch(e) { return false; }
+    }
     function openFileSafe(path) {
         var f = new File(path);
         if (!f.exists) throw new Error("File not found: " + path);
@@ -12,7 +20,17 @@
                 }
             } catch(e) {}
         }
-        return app.open(f);
+        var isPdf = fileLooksLikePdf(f);
+        for (var attempt = 0; attempt < 3; attempt++) {
+            try {
+                return app.open(f);
+            } catch(e) {
+                if (attempt >= 2) {
+                    throw new Error("open failed (" + (isPdf ? "pdf" : "ai") + "): " + e);
+                }
+                try { $.sleep(800); } catch(s) {}
+            }
+        }
     }
     function main() {
         if (files.length === 0) return;

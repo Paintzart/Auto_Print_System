@@ -23,7 +23,73 @@ def run_jsx(app, s: str):
     try:
         app.DoJavaScript(s)
     except Exception as e:
-        print(f"!!! JSX Error (Might be harmless): {e}")
+        print(f"   > JSX warning: {e}")
+
+
+def save_native_ai(doc, path: str) -> None:
+    """שמירה כ-.ai native (לא PDF עטוף ב-.ai) — נדרש לאיחוד merge."""
+    path = os.path.abspath(path)
+    folder = os.path.dirname(path)
+    if folder:
+        os.makedirs(folder, exist_ok=True)
+    safe_path = path.replace("\\", "/").replace('"', '\\"')
+    safe_name = str(doc.Name).replace("\\", "\\\\").replace('"', '\\"').replace("'", "\\'")
+    jsx = f"""
+    #target illustrator
+    (function() {{
+        var wanted = "{safe_name}";
+        var doc = null;
+        for (var i = 0; i < app.documents.length; i++) {{
+            if (app.documents[i].name === wanted) {{ doc = app.documents[i]; break; }}
+        }}
+        if (!doc) doc = app.activeDocument;
+        if (!doc) return "no_doc";
+        app.activeDocument = doc;
+        var f = new File("{safe_path}");
+        var opts = new IllustratorSaveOptions();
+        opts.pdfCompatible = false;
+        try {{ opts.compressed = true; }} catch(e) {{}}
+        try {{
+            opts.compatibility = Compatibility.ILLUSTRATOR24;
+        }} catch(e2) {{
+            try {{ opts.compatibility = Compatibility.ILLUSTRATOR17; }} catch(e3) {{}}
+        }}
+        doc.saveAs(f, opts);
+        return "ok";
+    }})();
+    """
+    app = doc.Application
+    app.DoJavaScript(jsx)
+    if is_pdf_disguised_as_ai(path):
+        print(f"   ⚠ save_native_ai: {os.path.basename(path)} still PDF — retry uncompressed")
+        jsx_retry = f"""
+        #target illustrator
+        (function() {{
+            var wanted = "{safe_name}";
+            var doc = null;
+            for (var i = 0; i < app.documents.length; i++) {{
+                if (app.documents[i].name === wanted) {{ doc = app.documents[i]; break; }}
+            }}
+            if (!doc) doc = app.activeDocument;
+            if (!doc) return "no_doc";
+            app.activeDocument = doc;
+            var f = new File("{safe_path}");
+            var opts = new IllustratorSaveOptions();
+            opts.pdfCompatible = false;
+            opts.compressed = false;
+            doc.saveAs(f, opts);
+            return "ok";
+        }})();
+        """
+        app.DoJavaScript(jsx_retry)
+
+
+def is_pdf_disguised_as_ai(path: str) -> bool:
+    try:
+        with open(path, "rb") as f:
+            return f.read(5) == b"%PDF-"
+    except OSError:
+        return False
 # --- סקריפטים JSX ---
 JSX_CLEAN_MAGIC = """
 #target illustrator
@@ -184,10 +250,10 @@ try{
 
 JSX_RECOLOR_GROUP = """
 #target illustrator
-function colRec(it, c) {
+function colRecPrint(it, c) {
     try {
         if (it.typename === 'GroupItem') {
-            for (var i=0; i<it.pageItems.length; i++) colRec(it.pageItems[i], c);
+            for (var i=0; i<it.pageItems.length; i++) colRecPrint(it.pageItems[i], c);
         } else if (it.typename === 'PathItem' && !it.clipping) {
             if (it.stroked && !it.filled) { it.strokeColor = c; }
             it.filled=true; it.fillColor=c; it.stroked=false;
@@ -231,7 +297,7 @@ function makePrintColor(r, g, b) {
 try {
     var grpN = "%GNAME%";
     var group = app.activeDocument.pageItems.getByName(grpN);
-    if (group) colRec(group, makePrintColor(%R%, %G%, %B%));
+    if (group) colRecPrint(group, makePrintColor(%R%, %G%, %B%));
 } catch(e) {}
 """
 
@@ -923,6 +989,7 @@ def place_variable_template_variant(
     prefix: str,
     text_overrides: Optional[dict] = None,
     image_files: Optional[dict] = None,
+    image_raster_flags: Optional[dict] = None,
     outline_text: bool = True,
     skip_simulation: bool = False,
     sim_hex: Optional[str] = None,
@@ -938,18 +1005,28 @@ def place_variable_template_variant(
         return 0.0
     text_overrides = text_overrides or {}
     image_files = image_files or {}
+    image_raster_flags = image_raster_flags or {}
     safe_tpl = template_path.replace("\\", "/").replace('"', '\\"')
     safe_doc = product_doc_name.replace("\\", "\\\\").replace('"', '\\"').replace("'", "\\'")
     safe_layer = layer_name.replace("\\", "\\\\").replace('"', '\\"')
     safe_ab = artboard_name.replace("\\", "\\\\").replace('"', '\\"')
     text_js = json.dumps({str(k): str(v) for k, v in text_overrides.items()}, ensure_ascii=False)
     img_js = json.dumps(
-        {str(k): p.replace("\\", "/") for k, p in image_files.items() if p and os.path.exists(p)},
+        {
+            str(k): os.path.abspath(p).replace("\\", "/")
+            for k, p in image_files.items()
+            if p and os.path.exists(p)
+        },
+        ensure_ascii=False,
+    )
+    img_raster_js = json.dumps(
+        {str(k): bool(v) for k, v in image_raster_flags.items()},
         ensure_ascii=False,
     )
     sr, sg, sb = hex_to_rgb(sim_hex) if sim_hex else (0, 0, 0)
-    pr, pg, pb = hex_to_rgb(print_hex) if print_hex else (sr, sg, sb)
-    do_print_color = "true" if print_hex or sim_hex else "false"
+    pr, pg, pb = hex_to_rgb(print_hex) if print_hex else (0, 0, 0)
+    do_print_color = "true" if print_hex else "false"
+    do_sim_color = "true" if sim_hex else "false"
     do_sim = "false" if skip_simulation else "true"
     do_outline = "true" if outline_text else "false"
     safe_cat = json.dumps(str(category or "A4"))
@@ -966,11 +1043,13 @@ def place_variable_template_variant(
         var PREFIX = "{prefix}";
         var TEXT_OVERRIDES = {text_js};
         var IMAGE_FILES = {img_js};
+        var IMAGE_RASTER = {img_raster_js};
         var OUTLINE_TEXT = {do_outline};
         var DO_SIMULATION = {do_sim};
         var SIM_R = {sr}; var SIM_G = {sg}; var SIM_B = {sb};
         var PRINT_R = {pr}; var PRINT_G = {pg}; var PRINT_B = {pb};
         var DO_PRINT_COLOR = {do_print_color};
+        var DO_SIM_COLOR = {do_sim_color};
         var CATEGORY = {safe_cat};
         var SHARED_TEMPLATE = {shared_tpl};
         var GROUP_NAME = "{safe_group}";
@@ -1023,21 +1102,10 @@ def place_variable_template_variant(
             }}
             return null;
         }}
-        function replaceNamedImage(container, name, filePath) {{
-            var item = findNamedItem(container, name);
-            if (!item || !filePath) return;
-            var bounds = item.visibleBounds;
-            var parent = item.parent;
-            item.remove();
-            var file = new File(filePath);
-            if (!file.exists) return;
-            var placed = parent.placedItems.add();
-            placed.file = file;
-            placed.name = name;
-            try {{ placed.embed(); }} catch(e) {{}}
-            var nb = placed.visibleBounds;
+        function fitItemToPlaceholderBounds(placed, bounds) {{
             var bw = bounds[2] - bounds[0];
             var bh = bounds[1] - bounds[3];
+            var nb = placed.visibleBounds;
             var iw = nb[2] - nb[0];
             var ih = nb[1] - nb[3];
             if (iw > 0 && ih > 0) {{
@@ -1047,7 +1115,64 @@ def place_variable_template_variant(
             }}
             var cx = bounds[0] + bw / 2;
             var cy = bounds[1] - bh / 2;
-            placed.position = [cx - placed.width / 2, cy + placed.height / 2];
+            var pcx = nb[0] + (nb[2] - nb[0]) / 2;
+            var pcy = nb[1] - (nb[1] - nb[3]) / 2;
+            placed.translate(cx - pcx, cy - pcy);
+        }}
+        function getHostLayer(item) {{
+            var host = item;
+            while (host && host.typename !== "Layer") {{
+                host = host.parent;
+            }}
+            return host;
+        }}
+        function replaceNamedImage(container, name, filePath, isRaster) {{
+            var item = findNamedItem(container, name);
+            if (!item || !filePath) return false;
+            var bounds = item.visibleBounds;
+            var parent = item.parent;
+            var hostLayer = parent.typename === "Layer" ? parent : getHostLayer(parent);
+            if (!hostLayer) return false;
+            var file = new File(filePath);
+            if (!file.exists) return false;
+            try {{ item.remove(); }} catch(e) {{ return false; }}
+            var placed = null;
+            if (isRaster) {{
+                try {{
+                    placed = hostLayer.placedItems.add();
+                    placed.file = file;
+                    placed.name = name;
+                    try {{ placed.embed(); }} catch(e) {{}}
+                }} catch(e) {{
+                    placed = null;
+                }}
+            }} else {{
+                try {{
+                    placed = hostLayer.groupItems.createFromFile(file);
+                    placed.name = name;
+                    try {{
+                        if (placed.pageItems && placed.pageItems.length > 0) {{
+                            var last = placed.pageItems[placed.pageItems.length - 1];
+                            if (last.typename === "GroupItem" || last.typename === "PathItem") {{
+                                last.remove();
+                            }}
+                        }}
+                    }} catch(e) {{}}
+                }} catch(e) {{
+                    placed = null;
+                }}
+            }}
+            if (!placed) return false;
+            var finalItem = findNamedItem(hostLayer, name);
+            if (!finalItem && parent.typename !== "Layer") {{
+                finalItem = findNamedItem(parent, name);
+            }}
+            if (finalItem) placed = finalItem;
+            if (parent.typename !== "Layer") {{
+                try {{ placed.move(parent, ElementPlacement.PLACEATEND); }} catch(e) {{}}
+            }}
+            try {{ fitItemToPlaceholderBounds(placed, bounds); }} catch(e) {{}}
+            return true;
         }}
         function captureCharStyle(charItem) {{
             var ca = charItem.characterAttributes;
@@ -1191,43 +1316,18 @@ def place_variable_template_variant(
         function applyStyleToAllChars(tf, saved) {{
             applyTextStyle(tf, saved);
         }}
-        function captureTextAnchor(tf) {{
-            var b = tf.visibleBounds;
-            var anchor = {{
-                left: b[0],
-                right: b[2],
-                top: b[1],
-                bottom: b[3],
-                centerX: (b[0] + b[2]) / 2,
-                centerY: b[1] - (b[1] - b[3]) / 2,
-                justification: null,
-                position: null
+        function getVisualCenter(item) {{
+            var b = item.visibleBounds;
+            return {{
+                x: (b[0] + b[2]) / 2,
+                y: b[1] - (b[1] - b[3]) / 2
             }};
-            try {{ anchor.justification = tf.textRange.paragraphAttributes.justification; }} catch(e) {{}}
-            try {{ anchor.position = [tf.position[0], tf.position[1]]; }} catch(e) {{}}
-            return anchor;
         }}
-        function lockTextFrameAnchor(tf, anchor) {{
-            if (!tf || !anchor) return;
-            try {{
-                if (anchor.position) {{
-                    tf.position = anchor.position;
-                    return;
-                }}
-            }} catch(e) {{}}
-            var b = tf.visibleBounds;
+        function lockVisualCenter(item, cx, cy) {{
+            var b = item.visibleBounds;
+            var nx = (b[0] + b[2]) / 2;
             var ny = b[1] - (b[1] - b[3]) / 2;
-            var dy = anchor.centerY - ny;
-            var dx = 0;
-            var just = anchor.justification;
-            if (just === Justification.CENTER) {{
-                dx = anchor.centerX - (b[0] + b[2]) / 2;
-            }} else if (just === Justification.RIGHT) {{
-                dx = anchor.right - b[2];
-            }} else {{
-                dx = anchor.left - b[0];
-            }}
-            tf.translate(dx, dy);
+            item.translate(cx - nx, cy - ny);
         }}
         function setTextPreserveStyle(tf, newText) {{
             if (!tf || tf.typename !== "TextFrame") return;
@@ -1236,7 +1336,7 @@ def place_variable_template_variant(
             tf.locked = false;
             tf.hidden = false;
             var saved = captureTextStyle(tf);
-            var anchorBefore = captureTextAnchor(tf);
+            var centerBefore = getVisualCenter(tf);
             var chars = null;
             try {{ chars = tf.textRange.characters; }} catch(e) {{ chars = null; }}
             var oldLen = chars ? chars.length : 0;
@@ -1278,6 +1378,7 @@ def place_variable_template_variant(
                 }} catch(e) {{}}
             }}
             applyParagraphStyleOnly(tf, saved);
+            try {{ tf.textRange.paragraphAttributes.justification = Justification.CENTER; }} catch(e) {{}}
             try {{
                 if (saved.kind === TextType.AREATEXT) {{
                     if (saved.width > 0) tf.width = saved.width;
@@ -1285,7 +1386,7 @@ def place_variable_template_variant(
                 }}
                 if (saved.orientation !== undefined && saved.orientation !== null) tf.orientation = saved.orientation;
             }} catch(e) {{}}
-            lockTextFrameAnchor(tf, anchorBefore);
+            lockVisualCenter(tf, centerBefore.x, centerBefore.y);
         }}
         function forEachTextFrame(root, fn) {{
             try {{
@@ -1425,10 +1526,10 @@ def place_variable_template_variant(
             rgb.red = r; rgb.green = g; rgb.blue = b;
             return rgb;
         }}
-        function colRec(it, c) {{
+        function colRecPrint(it, c) {{
             try {{
                 if (it.typename === "GroupItem") {{
-                    for (var ci = 0; ci < it.pageItems.length; ci++) colRec(it.pageItems[ci], c);
+                    for (var ci = 0; ci < it.pageItems.length; ci++) colRecPrint(it.pageItems[ci], c);
                 }} else if (it.typename === "PathItem" && !it.clipping) {{
                     if (it.stroked && !it.filled) {{ it.strokeColor = c; }}
                     it.filled = true; it.fillColor = c; it.stroked = false;
@@ -1453,7 +1554,7 @@ def place_variable_template_variant(
             }} catch(e) {{}}
         }}
         function recolorDeep(item, c) {{
-            colRec(item, c);
+            colRecPrint(item, c);
         }}
         function getSimBoxSuffix(category, itemW, itemH) {{
             var suffix = "A4_Square";
@@ -1644,7 +1745,8 @@ def place_variable_template_variant(
         }}
         for (var ik in IMAGE_FILES) {{
             if (IMAGE_FILES.hasOwnProperty(ik)) {{
-                replaceNamedImage(tplDoc, ik, IMAGE_FILES[ik]);
+                var asRaster = IMAGE_RASTER[ik] === true;
+                replaceNamedImage(tplDoc, ik, IMAGE_FILES[ik], asRaster);
             }}
         }}
         if (OUTLINE_TEXT) {{
@@ -1665,7 +1767,7 @@ def place_variable_template_variant(
 
         if (DO_PRINT_COLOR === "true") {{
             var pc = makePrintColor(PRINT_R, PRINT_G, PRINT_B);
-            colRec(copyRoot, pc);
+            colRecPrint(copyRoot, pc);
         }}
 
         tplDoc.selection = null;
@@ -1726,7 +1828,7 @@ def place_variable_template_variant(
 
         if (DO_PRINT_COLOR === "true") {{
             var pc2 = makePrintColor(PRINT_R, PRINT_G, PRINT_B);
-            colRec(placed, pc2);
+            colRecPrint(placed, pc2);
         }}
 
         if (DO_SIMULATION) {{
@@ -1742,9 +1844,9 @@ def place_variable_template_variant(
                 var simCopy = placed.duplicate(simTarget, ElementPlacement.PLACEATEND);
                 simCopy.hidden = false;
                 placeSimExactFromTemplate(simCopy, layoutOff, tplW, tplH, PREFIX, CATEGORY);
-                if (SIM_R + SIM_G + SIM_B > 0) {{
+                if (DO_SIM_COLOR === "true") {{
                     var c = makePrintColor(SIM_R, SIM_G, SIM_B);
-                    recolorItem(simCopy, c);
+                    colRecPrint(simCopy, c);
                 }}
                 simCopy.name = "";
             }} catch(e) {{}}
@@ -1785,6 +1887,132 @@ def place_variable_template_variant(
     except Exception as e:
         print(f"   > Template placement error: {e}")
         return 0.0
+
+
+def refresh_template_side_colors(
+    app,
+    side: str,
+    variants: list,
+    loc: dict,
+    h1: str,
+    resolve_colors_fn,
+) -> None:
+    """מחיל צבע מחדש אחרי outline — לשכבות Print ו-Simulation."""
+    prefix = loc.get("prefix") or {"front": "F", "back": "B", "right_sleeve": "RS", "left_sleeve": "LS"}.get(side, "F")
+    side_map = {"F": "Front", "B": "Back", "RS": "Right_Sleeve", "LS": "Left_Sleeve"}
+    sim_side = side_map.get(prefix, "Front")
+
+    for vi, variant in enumerate(variants):
+        slot_idx = vi + 1
+        layer_name, _ = variable_layer_and_artboard(side, slot_idx)
+        sim_hex, print_hex = resolve_colors_fn(variant, loc, h1)
+        if sim_hex is None and print_hex is None:
+            continue
+        group_name = f"P_{prefix}_s{slot_idx}"
+        if print_hex:
+            r, g, b = hex_to_rgb(print_hex)
+            safe_layer = layer_name.replace("\\", "\\\\").replace('"', '\\"')
+            safe_group = group_name.replace("\\", "\\\\").replace('"', '\\"')
+            jsx_print = f"""
+            #target illustrator
+            (function() {{
+                function makePrintColor(r, g, b) {{
+                    try {{
+                        if (app.activeDocument.documentColorSpace == DocumentColorSpace.CMYK) {{
+                            var cmykArr = app.convertSampleColor(
+                                ImageColorSpace.RGB, ColorModel.PROCESS, [r, g, b],
+                                ImageColorSpace.CMYK, ColorModel.PROCESS, []
+                            );
+                            var cm = new CMYKColor();
+                            cm.cyan = cmykArr[0]; cm.magenta = cmykArr[1];
+                            cm.yellow = cmykArr[2]; cm.black = cmykArr[3];
+                            return cm;
+                        }}
+                    }} catch(e) {{}}
+                    var rgb = new RGBColor();
+                    rgb.red = r; rgb.green = g; rgb.blue = b;
+                    return rgb;
+                }}
+                function colRecPrint(it, c) {{
+                    try {{
+                        if (it.typename === "GroupItem") {{
+                            for (var ci = 0; ci < it.pageItems.length; ci++) colRecPrint(it.pageItems[ci], c);
+                        }} else if (it.typename === "PathItem" && !it.clipping) {{
+                            if (it.stroked && !it.filled) {{ it.strokeColor = c; }}
+                            it.filled = true; it.fillColor = c; it.stroked = false;
+                        }} else if (it.typename === "CompoundPathItem") {{
+                            for (var cj = 0; cj < it.pathItems.length; cj++) {{
+                                if (!it.pathItems[cj].clipping) {{
+                                    it.pathItems[cj].filled = true;
+                                    it.pathItems[cj].fillColor = c;
+                                    it.pathItems[cj].stroked = false;
+                                }}
+                            }}
+                        }} else if (it.typename === "TextFrame") {{
+                            try {{
+                                var chars = it.textRange.characters;
+                                for (var ti = 0; ti < chars.length; ti++) {{
+                                    chars[ti].characterAttributes.fillColor = c;
+                                    chars[ti].characterAttributes.filled = true;
+                                    chars[ti].characterAttributes.stroked = false;
+                                }}
+                            }} catch(e) {{}}
+                        }}
+                    }} catch(e) {{}}
+                }}
+                var doc = app.activeDocument;
+                var layer = doc.layers.getByName("{safe_layer}");
+                layer.locked = false;
+                var grp = null;
+                try {{ grp = layer.pageItems.getByName("{safe_group}"); }} catch(e) {{ return; }}
+                if (grp) colRecPrint(grp, makePrintColor({r}, {g}, {b}));
+            }})();
+            """
+            run_jsx(app, jsx_print)
+
+        if vi == 0 and sim_hex:
+            sr, sg, sb = hex_to_rgb(sim_hex)
+            jsx_sim = f"""
+            #target illustrator
+            (function() {{
+                function makePrintColor(r, g, b) {{
+                    var rgb = new RGBColor();
+                    rgb.red = r; rgb.green = g; rgb.blue = b;
+                    return rgb;
+                }}
+                function colRecPrint(it, c) {{
+                    try {{
+                        if (it.typename === "GroupItem") {{
+                            for (var ci = 0; ci < it.pageItems.length; ci++) colRecPrint(it.pageItems[ci], c);
+                        }} else if (it.typename === "PathItem" && !it.clipping) {{
+                            it.filled = true; it.fillColor = c; it.stroked = false;
+                        }} else if (it.typename === "CompoundPathItem") {{
+                            for (var cj = 0; cj < it.pathItems.length; cj++) {{
+                                if (!it.pathItems[cj].clipping) {{
+                                    it.pathItems[cj].filled = true;
+                                    it.pathItems[cj].fillColor = c;
+                                    it.pathItems[cj].stroked = false;
+                                }}
+                            }}
+                        }}
+                    }} catch(e) {{}}
+                }}
+                var doc = app.activeDocument;
+                var simLayer = doc.layers.getByName("Simulation");
+                simLayer.visible = true;
+                var target = simLayer.layers.getByName("S_Placement_{sim_side}");
+                target.visible = true;
+                target.locked = false;
+                var c = makePrintColor({sr}, {sg}, {sb});
+                for (var i = 0; i < target.pageItems.length; i++) {{
+                    var it = target.pageItems[i];
+                    var nm = it.name || "";
+                    if (nm.indexOf("_Box_") !== -1) continue;
+                    colRecPrint(it, c);
+                }}
+            }})();
+            """
+            run_jsx(app, jsx_sim)
 
 
 def place_and_simulate_print(
