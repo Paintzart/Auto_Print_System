@@ -13,7 +13,9 @@ FILES_TO_UPDATE = {
     "package.json": "https://raw.githubusercontent.com/Paintzart/Auto_Print_System/refs/heads/main/package.json",
     "package-lock.json": "https://raw.githubusercontent.com/Paintzart/Auto_Print_System/refs/heads/main/package-lock.json", # חדש!
     "requirements.txt": "https://raw.githubusercontent.com/Paintzart/Auto_Print_System/refs/heads/main/requirements.txt", # חדש!
-    "sidebar_logic.jsx": "https://raw.githubusercontent.com/Paintzart/Auto_Print_System/refs/heads/main/sidebar_logic.jsx" # חדש!
+    "sidebar_logic.jsx": "https://raw.githubusercontent.com/Paintzart/Auto_Print_System/refs/heads/main/sidebar_logic.jsx", # חדש!
+    "variable_print.py": "https://raw.githubusercontent.com/Paintzart/Auto_Print_System/refs/heads/main/variable_print.py", # כפתור כתום
+    "run_merge_batch.jsx": "https://raw.githubusercontent.com/Paintzart/Auto_Print_System/refs/heads/main/run_merge_batch.jsx", # כפתור כתום
 }
 def update_files():
     print("--- בודק עדכונים מהענן (GitHub) ---")
