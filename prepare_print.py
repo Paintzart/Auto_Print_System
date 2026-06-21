@@ -62,45 +62,44 @@ function createSimSummary() {
     var A4_W = 595.28;
     var A4_H = 841.89;
     var isLandscape = (simLayersData.length > 2);
-    var targetDoc = app.documents.add(DocumentColorSpace.CMYK,
-                                      isLandscape ? A4_H : A4_W,
-                                      isLandscape ? A4_W : A4_H);
-    var cellW, cellH;
-    if (!isLandscape) { cellW = A4_W; cellH = A4_H / 2; }
-    else { cellW = A4_H / 2; cellH = A4_W / 2; }
+    var docW = isLandscape ? A4_H : A4_W;
+    var docH = isLandscape ? A4_W : A4_H;
+    var targetDoc = app.documents.add(DocumentColorSpace.CMYK, docW, docH);
+    var baseRect = targetDoc.artboards[0].artboardRect;
+    var abW = baseRect[2] - baseRect[0];
+    var abH = baseRect[1] - baseRect[3];
+    var gap = 50;
+    var margin = 20;
     var itemsPerSheet = isLandscape ? 4 : 2;
-    var sheetCount = 1;
-    for (var i = 0; i < simLayersData.length; i++) {
-        var currentData = simLayersData[i];
-        if (i > 0 && i % itemsPerSheet === 0) {
-            targetDoc.artboards.add(targetDoc.artboards[0].artboardRect);
-            sheetCount++;
-        }
-        var tempGroup = manualGroup(currentData.layer);
-        var targetGroup = tempGroup.duplicate(targetDoc.activeLayer, ElementPlacement.PLACEATEND);
-        if (targetGroup) {
-            app.activeDocument = targetDoc;
-            var indexOnPage = i % itemsPerSheet;
-            var col = 0, row = 0;
-            if (!isLandscape) { col = 0; row = indexOnPage; }
-            else { col = indexOnPage % 2; row = Math.floor(indexOnPage / 2); }
-            var margin = 20;
-            var targetW = cellW - (margin * 2);
-            var targetH = cellH - (margin * 2);
-            var scaleX = (targetW / targetGroup.width) * 100;
-            var scaleY = (targetH / targetGroup.height) * 100;
-            var scale = Math.min(scaleX, scaleY);
-            if (scale > 100) scale = 100;
-            targetGroup.resize(scale, scale, true, true, true, true, scale);
-            var abRect = targetDoc.artboards[sheetCount-1].artboardRect;
-            var abLeft = abRect[0];
-            var abTop = abRect[1];
-            var cellCenterX = abLeft + (col * cellW) + (cellW / 2);
-            var cellCenterY = abTop - (row * cellH) - (cellH / 2);
-            targetGroup.position = [
-                cellCenterX - (targetGroup.width / 2),
-                cellCenterY + (targetGroup.height / 2)
+    var pages = [];
+    var remaining = simLayersData.length;
+    while (remaining > 0) {
+        pages.push(Math.min(itemsPerSheet, remaining));
+        remaining -= pages[pages.length - 1];
+    }
+    var simIndex = 0;
+    for (var p = 0; p < pages.length; p++) {
+        var onPage = pages[p];
+        var abRect = baseRect;
+        if (p > 0) {
+            var offsetY = p * (abH + gap);
+            var newRect = [
+                baseRect[0],
+                baseRect[1] - offsetY,
+                baseRect[2],
+                baseRect[3] - offsetY
             ];
+            targetDoc.artboards.add(newRect);
+            abRect = targetDoc.artboards[targetDoc.artboards.length - 1].artboardRect;
+        }
+        for (var s = 0; s < onPage; s++) {
+            var currentData = simLayersData[simIndex++];
+            var tempGroup = manualGroup(currentData.layer);
+            var targetGroup = tempGroup.duplicate(targetDoc.activeLayer, ElementPlacement.PLACEATEND);
+            if (targetGroup) {
+                app.activeDocument = targetDoc;
+                placeSimOnPage(targetGroup, abRect, onPage, s, isLandscape, margin);
+            }
         }
     }
     var saveOpts = new PDFSaveOptions();
@@ -108,6 +107,58 @@ function createSimSummary() {
     targetDoc.saveAs(new File(savePath), saveOpts);
     targetDoc.close(SaveOptions.DONOTSAVECHANGES);
     sourceDoc.close(SaveOptions.DONOTSAVECHANGES);
+}
+function slotsForSimCount(count) {
+    if (count === 1) return [{col: 0, row: 0, cols: 1, rows: 1}];
+    if (count === 2) {
+        return [
+            {col: 0, row: 0, cols: 2, rows: 1},
+            {col: 1, row: 0, cols: 2, rows: 1}
+        ];
+    }
+    if (count === 3) {
+        return [
+            {col: 0, row: 0, cols: 2, rows: 2},
+            {col: 1, row: 0, cols: 2, rows: 2},
+            {col: 0, row: 1, cols: 2, rows: 2}
+        ];
+    }
+    return [
+        {col: 0, row: 0, cols: 2, rows: 2},
+        {col: 1, row: 0, cols: 2, rows: 2},
+        {col: 0, row: 1, cols: 2, rows: 2},
+        {col: 1, row: 1, cols: 2, rows: 2}
+    ];
+}
+function placeSimOnPage(group, abRect, countOnPage, slotIndex, isLandscape, margin) {
+    var slot;
+    if (!isLandscape) {
+        slot = {col: 0, row: slotIndex, cols: 1, rows: countOnPage};
+    } else {
+        slot = slotsForSimCount(countOnPage)[slotIndex];
+    }
+    var left = abRect[0], top = abRect[1], right = abRect[2], bottom = abRect[3];
+    var pageW = right - left;
+    var pageH = top - bottom;
+    var cellW = pageW / slot.cols;
+    var cellH = pageH / slot.rows;
+    var cellLeft = left + slot.col * cellW;
+    var cellTop = top - slot.row * cellH;
+    var targetW = cellW - (margin * 2);
+    var targetH = cellH - (margin * 2);
+    if (targetW < 1) targetW = cellW;
+    if (targetH < 1) targetH = cellH;
+    var scaleX = (targetW / group.width) * 100;
+    var scaleY = (targetH / group.height) * 100;
+    var scale = Math.min(scaleX, scaleY);
+    if (scale > 100) scale = 100;
+    group.resize(scale, scale, true, true, true, true, scale);
+    var cellCenterX = cellLeft + (cellW / 2);
+    var cellCenterY = cellTop - (cellH / 2);
+    group.position = [
+        cellCenterX - (group.width / 2),
+        cellCenterY + (group.height / 2)
+    ];
 }
 function manualGroup(layerObj) {
     var newGroup = layerObj.groupItems.add();

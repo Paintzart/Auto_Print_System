@@ -57,7 +57,7 @@
             processNextFileFast(masterDoc, files[j], (j+1).toString(), col * STEP_X, -(row * STEP_Y));
         }
         var sideFile = new File("C:/Users/yarde/OneDrive/Desktop/Auto_Print_System/sidebar_logic.jsx");
-        var showSidebar = true;
+        var showSidebar = false;
         $.writeln("=== MERGE SCRIPT: Sidebar check ===");
         $.writeln("showSidebar: " + showSidebar);
         $.writeln("sideFile exists: " + sideFile.exists);
