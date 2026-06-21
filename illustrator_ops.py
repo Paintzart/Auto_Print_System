@@ -32,6 +32,17 @@ def save_native_ai(doc, path: str) -> None:
     folder = os.path.dirname(path)
     if folder:
         os.makedirs(folder, exist_ok=True)
+    # ניסיון COM קודם — יציב יותר למסמכים גדולים (51 artboards)
+    try:
+        opts = win32com.client.Dispatch("Illustrator.IllustratorSaveOptions")
+        opts.PDFCompatible = False
+        opts.Compressed = False
+        doc.SaveAs(path, opts)
+        if not is_pdf_disguised_as_ai(path):
+            return
+        print(f"   ⚠ save_native_ai COM: {os.path.basename(path)} still PDF — retry JSX")
+    except Exception as e:
+        print(f"   ⚠ save_native_ai COM failed: {e}")
     safe_path = path.replace("\\", "/").replace('"', '\\"')
     safe_name = str(doc.Name).replace("\\", "\\\\").replace('"', '\\"').replace("'", "\\'")
     jsx = f"""
@@ -584,17 +595,34 @@ try{app.activeDocument.textFrames.getByName("%TF%").remove();}catch(e){}
 """
 JSX_CLEAN_BOXES = """
 #target illustrator
-try {
-    var doc = app.activeDocument;
-    // רצים בלולאה הפוכה (חשוב מאוד במחיקה)
-    for (var i = doc.pageItems.length - 1; i >= 0; i--) {
-        var item = doc.pageItems[i];
-        // בדיקה: אם השם מכיל "_Box_", זה ריבוע עזר -> למחוק!
-        if (item.name.indexOf("_Box_") !== -1) {
-            item.remove();
-        }
-    }
-} catch(e) {}
+(function() {
+    function removeBoxesRecursive(container) {
+        if (!container) return;
+        try {
+            if (container.pageItems) {
+                for (var i = container.pageItems.length - 1; i >= 0; i--) {
+                    try {
+                        var it = container.pageItems[i];
+                        var nm = it.name || "";
+                        if (nm.indexOf("_Box_") !== -1) {
+                            it.remove();
+                        } else if (it.typename === "GroupItem") {
+                            removeBoxesRecursive(it);
+                        }
+                    } catch(e) {}
+                }
+            }
+        } catch(e) {}
+        try {
+            if (container.layers) {
+                for (var j = 0; j < container.layers.length; j++) {
+                    removeBoxesRecursive(container.layers[j]);
+                }
+            }
+        } catch(e) {}
+    }
+    try { removeBoxesRecursive(app.activeDocument); } catch(e) {}
+})();
 """
 JSX_EXTRA_COLORS = """
 #target illustrator
@@ -683,11 +711,38 @@ def get_doc_safe(app):
             time.sleep(0.5)
     return None
 def get_layer(doc, name):
+    def _walk(layer):
+        try:
+            if layer.Name == name:
+                layer.Visible = True
+                layer.Locked = False
+                return layer
+        except Exception:
+            pass
+        try:
+            for i in range(1, layer.Layers.Count + 1):
+                found = _walk(layer.Layers(i))
+                if found:
+                    return found
+        except Exception:
+            pass
+        return None
+
     try:
         l = doc.Layers(name)
-        l.Visible = True; l.Locked = False
+        l.Visible = True
+        l.Locked = False
         return l
-    except: return None
+    except Exception:
+        pass
+    try:
+        for i in range(1, doc.Layers.Count + 1):
+            found = _walk(doc.Layers(i))
+            if found:
+                return found
+    except Exception:
+        pass
+    return None
 def clean_arts(grp):
     try:
         if grp.PageItems.Count > 0:
@@ -738,102 +793,305 @@ VARIABLE_SIDE_BASE = {
 # פריסת ארטבורדים להדפס משתנה – רשת עם מרווחים, ללא חפיפות
 VARIABLE_PRINT_COLS = 5
 VARIABLE_PRINT_GAP_MIN = 150
+VARIABLE_PRINT_MAX_COLS = 11
+VARIABLE_PRINT_MAX_ROWS = 10
 
 
-def setup_variable_print_slots(app, side: str, count: int) -> None:
-    """יוצר שכבות וארטבורדים ממוספרים (Print_Back_1..N) בפריסת רשת ללא חפיפות."""
-    if count < 1:
-        return
-    cfg = VARIABLE_SIDE_BASE.get(side)
-    if not cfg:
-        return
-    base_layer = cfg["layer"]
-    base_ab = cfg["artboard"]
-    if side in ("right_sleeve", "left_sleeve"):
-        ab_prefix = cfg["layer"]
-    else:
-        ab_prefix = base_layer
-    cols = min(VARIABLE_PRINT_COLS, max(1, count))
-    rows = (count + cols - 1) // cols
-    gap_min = VARIABLE_PRINT_GAP_MIN
-    print(f"   > Variable grid {side}: {count} slots ({cols} cols x {rows} rows, gap>={gap_min}pt)")
+def variable_grid_columns(count: int) -> int:
+    """עמודות לרשת — מקס ~11 בשורה (מגבלת קנבס עם artboards קיימים), עד 10 שורות."""
+    if count <= 1:
+        return 1
+    if count <= 5:
+        return count
+    rows_at_max = (count + VARIABLE_PRINT_MAX_COLS - 1) // VARIABLE_PRINT_MAX_COLS
+    if rows_at_max <= VARIABLE_PRINT_MAX_ROWS:
+        return min(VARIABLE_PRINT_MAX_COLS, count)
+    for cols in range(5, VARIABLE_PRINT_MAX_COLS + 1):
+        rows = (count + cols - 1) // cols
+        if rows <= VARIABLE_PRINT_MAX_ROWS:
+            return cols
+    return VARIABLE_PRINT_MAX_COLS
+
+
+def activate_document(app, doc_name: str) -> bool:
+    if not doc_name:
+        return True
+    safe = json.dumps(str(doc_name))
     jsx = f"""
     #target illustrator
     (function() {{
-        var doc = app.activeDocument;
-        var count = {int(count)};
-        var cols = {int(cols)};
-        var gapMin = {int(gap_min)};
+        var want = {safe};
+        for (var i = 0; i < app.documents.length; i++) {{
+            if (app.documents[i].name === want) {{
+                app.activeDocument = app.documents[i];
+                return "1";
+            }}
+        }}
+        return "0";
+    }})();
+    """
+    try:
+        return str(app.DoJavaScript(jsx)).strip() == "1"
+    except Exception as e:
+        print(f"   > JSX warning: {e}")
+        return False
+
+
+def get_template_artboard_size(app, template_path: str) -> tuple[float, float]:
+    """גודל artboard פעיל בתבנית AI (רוחב/גובה בנקודות)."""
+    if not template_path or not os.path.exists(template_path):
+        return 0.0, 0.0
+    safe = template_path.replace("\\", "/").replace('"', '\\"')
+    jsx = f"""
+    #target illustrator
+    (function() {{
+        var f = new File("{safe}");
+        if (!f.exists) return "0|0";
+        var d = null;
+        try {{ d = app.open(f); }} catch(e) {{ return "0|0"; }}
+        var idx = 0;
+        try {{ idx = d.artboards.getActiveArtboardIndex(); }} catch(e) {{}}
+        var r = d.artboards[idx].artboardRect;
+        var w = r[2] - r[0];
+        var h = r[1] - r[3];
+        d.close(SaveOptions.DONOTSAVECHANGES);
+        return w + "|" + h;
+    }})();
+    """
+    try:
+        raw = str(app.DoJavaScript(jsx)).strip()
+        parts = raw.split("|")
+        return float(parts[0]), float(parts[1])
+    except Exception:
+        return 0.0, 0.0
+
+
+def get_template_content_size(app, template_path: str) -> tuple[float, float]:
+    """גודל תוכן ההדפסה על artboard התבנית (לא גודל הדף) — לרשת variants."""
+    if not template_path or not os.path.exists(template_path):
+        return 0.0, 0.0
+    safe = template_path.replace("\\", "/").replace('"', '\\"')
+    jsx = f"""
+    #target illustrator
+    (function() {{
+        var f = new File("{safe}");
+        if (!f.exists) return "0|0";
+        var d = null;
+        try {{ d = app.open(f); }} catch(e) {{ return "0|0"; }}
+        var idx = 0;
+        try {{ idx = d.artboards.getActiveArtboardIndex(); }} catch(e) {{}}
+        var abRect = d.artboards[idx].artboardRect;
+        var left = 1e15, top = -1e15, right = -1e15, bottom = 1e15;
+        function grow(it) {{
+            try {{
+                var b = it.visibleBounds;
+                if (b[0] < left) left = b[0];
+                if (b[1] > top) top = b[1];
+                if (b[2] > right) right = b[2];
+                if (b[3] < bottom) bottom = b[3];
+            }} catch(e) {{}}
+        }}
+        function scanLayer(layer) {{
+            if (!layer || !layer.visible) return;
+            for (var pi = 0; pi < layer.pageItems.length; pi++) {{
+                var it = layer.pageItems[pi];
+                var nm = it.name || "";
+                if (nm.indexOf("_Box_") !== -1) continue;
+                grow(it);
+            }}
+            for (var li = 0; li < layer.layers.length; li++) scanLayer(layer.layers[li]);
+        }}
+        for (var i = 0; i < d.layers.length; i++) scanLayer(d.layers[i]);
+        d.close(SaveOptions.DONOTSAVECHANGES);
+        if (right <= left + 1 || top <= bottom + 1) {{
+            var w = abRect[2] - abRect[0];
+            var h = abRect[1] - abRect[3];
+            return w + "|" + h;
+        }}
+        return (right - left) + "|" + (top - bottom);
+    }})();
+    """
+    try:
+        raw = str(app.DoJavaScript(jsx)).strip()
+        parts = raw.split("|")
+        return float(parts[0]), float(parts[1])
+    except Exception:
+        return 0.0, 0.0
+
+
+# Illustrator יציב עד ~30 artboards — מעל זה: artboard יחיד + grid
+VARIABLE_SIM_MAX_ARTBOARDS = 30
+
+
+def variable_sim_use_layers_only(variant_count: int) -> bool:
+    return variant_count > VARIABLE_SIM_MAX_ARTBOARDS
+
+
+def create_variable_prints_document(
+    app,
+    main_doc_name: str,
+    side: str,
+    page_w: float,
+    page_h: float,
+) -> str:
+    """מסמך AI חדש — artboard ראשון בגודל התבנית + שכבת Print עם box מהמסמך הראשי."""
+    cfg = VARIABLE_SIDE_BASE.get(side)
+    if not cfg or page_w < 1 or page_h < 1:
+        return ""
+    if main_doc_name and not activate_document(app, main_doc_name):
+        return ""
+    base_layer = cfg["layer"]
+    base_ab = cfg["artboard"]
+    w = float(page_w)
+    h = float(page_h)
+    jsx = f"""
+    #target illustrator
+    (function() {{
+        var mainDoc = app.activeDocument;
+        var pageW = {w};
+        var pageH = {h};
         var baseLayerName = {json.dumps(base_layer)};
         var baseAbName = {json.dumps(base_ab)};
-        var abPrefix = {json.dumps(ab_prefix)};
-
-        function rectsOverlap(a, b) {{
-            if (a[2] <= b[0] || a[0] >= b[2]) return false;
-            if (a[3] >= b[1] || a[1] <= b[3]) return false;
-            return true;
-        }}
-        function makeRect(left, top, w, h) {{
-            return [left, top, left + w, top - h];
-        }}
-        function planGrid(anchorLeft, anchorTop, w, h, total, columns, gapX, gapY) {{
-            var planned = [];
-            for (var si = 1; si <= total; si++) {{
-                var idx = si - 1;
-                var col = idx % columns;
-                var row = Math.floor(idx / columns);
-                var left = anchorLeft + col * (w + gapX);
-                var top = anchorTop - row * (h + gapY);
-                planned.push({{ index: si, rect: makeRect(left, top, w, h) }});
+        function findLayerByName(container, name) {{
+            if (!container || !container.layers) return null;
+            for (var li = 0; li < container.layers.length; li++) {{
+                var lyr = container.layers[li];
+                if (lyr.name === name) return lyr;
+                var sub = findLayerByName(lyr, name);
+                if (sub) return sub;
             }}
-            return planned;
+            return null;
         }}
-        function gridHasOverlap(planned, reservedNames) {{
-            for (var pi = 0; pi < planned.length; pi++) {{
-                var rect = planned[pi].rect;
-                for (var pj = pi + 1; pj < planned.length; pj++) {{
-                    if (rectsOverlap(rect, planned[pj].rect)) return true;
-                }}
-                for (var ai = 0; ai < doc.artboards.length; ai++) {{
-                    var ab = doc.artboards[ai];
-                    if (reservedNames[ab.name]) continue;
-                    if (rectsOverlap(rect, ab.artboardRect)) return true;
+        function hasPlacementBox(item) {{
+            var n = item.name || "";
+            if (n.indexOf("_Box_") !== -1) return true;
+            if (item.typename === "GroupItem" && item.pageItems) {{
+                for (var k = 0; k < item.pageItems.length; k++) {{
+                    if (hasPlacementBox(item.pageItems[k])) return true;
                 }}
             }}
             return false;
         }}
-        function findFreeGrid(origRect, total, columns, gapX, gapY, reservedNames) {{
-            var w = origRect[2] - origRect[0];
-            var h = origRect[1] - origRect[3];
-            var origLeft = origRect[0];
-            var origTop = origRect[1];
-            var stepX = w + gapX;
-            var stepY = h + gapY;
-            for (var shiftRow = 0; shiftRow < 120; shiftRow++) {{
-                for (var shiftCol = 0; shiftCol < 120; shiftCol++) {{
-                    var anchorLeft = origLeft + shiftCol * stepX;
-                    var anchorTop = origTop - shiftRow * stepY;
-                    var planned = planGrid(anchorLeft, anchorTop, w, h, total, columns, gapX, gapY);
-                    if (!gridHasOverlap(planned, reservedNames)) {{
-                        return planned;
-                    }}
+        var srcLayer = findLayerByName(mainDoc, baseLayerName);
+        var newDoc = app.documents.add(DocumentColorSpace.CMYK, pageW, pageH);
+        try {{ newDoc.artboards[0].name = baseAbName; }} catch(e) {{}}
+        var dstLayer = newDoc.layers[0];
+        dstLayer.name = baseLayerName;
+        dstLayer.locked = false;
+        if (srcLayer && srcLayer.pageItems) {{
+            for (var pi = 0; pi < srcLayer.pageItems.length; pi++) {{
+                var it = srcLayer.pageItems[pi];
+                if (!hasPlacementBox(it)) continue;
+                try {{
+                    it.duplicate(dstLayer, ElementPlacement.PLACEATEND);
+                }} catch(e2) {{}}
+            }}
+        }}
+        return newDoc.name;
+    }})();
+    """
+    try:
+        name = str(app.DoJavaScript(jsx)).strip()
+        if name and name != "undefined":
+            print(f"   > Variable prints document: {name} ({w:.0f}x{h:.0f} pt)")
+            return name
+    except Exception as e:
+        print(f"   > JSX warning (create prints doc): {e}")
+    return ""
+
+
+def ensure_variable_print_slot(
+    app,
+    side: str,
+    slot_idx: int,
+    total: int,
+    doc_name: str = "",
+    layers_only: bool = False,
+    cell_w: float = 0,
+    cell_h: float = 0,
+    ab_w: float = 0,
+    ab_h: float = 0,
+    reposition_grid: bool = True,
+) -> bool:
+    """יוצר/מאמת slot — artboard _N בגודל תבנית (cell_w/h) או layers-only."""
+    if slot_idx < 1 or total < 1:
+        return False
+    cfg = VARIABLE_SIDE_BASE.get(side)
+    if not cfg:
+        return False
+    if doc_name and not activate_document(app, doc_name):
+        return False
+    base_layer = cfg["layer"]
+    base_ab = cfg["artboard"]
+    ab_prefix = cfg["layer"] if side in ("right_sleeve", "left_sleeve") else base_layer
+    cols = variable_grid_columns(total) if total > 5 else min(VARIABLE_PRINT_COLS, max(1, total))
+    gap_min = VARIABLE_PRINT_GAP_MIN
+    layers_only_js = "true" if layers_only else "false"
+    reposition_js = "true" if reposition_grid else "false"
+    jsx = f"""
+    #target illustrator
+    (function() {{
+        var doc = app.activeDocument;
+        var slotIdx = {int(slot_idx)};
+        var total = {int(total)};
+        var cols = {int(cols)};
+        var gapMin = {int(gap_min)};
+        var layersOnly = {layers_only_js};
+        var REPOSITION = {reposition_js};
+        var CELL_W = {float(cell_w)};
+        var CELL_H = {float(cell_h)};
+        var AB_W = {float(ab_w)};
+        var AB_H = {float(ab_h)};
+        var baseLayerName = {json.dumps(base_layer)};
+        var baseAbName = {json.dumps(base_ab)};
+        var abPrefix = {json.dumps(ab_prefix)};
+        var slotLayerName = baseLayerName + "_" + slotIdx;
+        var slotAbName = abPrefix + "_" + slotIdx;
+
+        function findLayerByName(container, name) {{
+            if (!container || !container.layers) return null;
+            for (var li = 0; li < container.layers.length; li++) {{
+                var lyr = container.layers[li];
+                if (lyr.name === name) return lyr;
+                var sub = findLayerByName(lyr, name);
+                if (sub) return sub;
+            }}
+            return null;
+        }}
+        function getPrintLayerContainer(baseLayer) {{
+            try {{
+                var p = baseLayer.parent;
+                if (p && p.typename === "Layer") return p;
+            }} catch(e) {{}}
+            return doc;
+        }}
+        function addPrintLayer(container, layerName) {{
+            var nl;
+            if (container.typename === "Layer") nl = container.layers.add();
+            else nl = doc.layers.add();
+            nl.name = layerName;
+            nl.zOrder(ZOrderMethod.BRINGTOFRONT);
+            return nl;
+        }}
+        function addArtboardSafe(rect, abW, abH, gapX, gapY) {{
+            var r = [rect[0], rect[1], rect[2], rect[3]];
+            if ((r[2] - r[0]) < 1 || (r[1] - r[3]) < 1) return null;
+            var tries = [
+                r,
+                [r[0], r[1] - (abH + gapY), r[2], r[3] - (abH + gapY)],
+                [r[0] + (r[2] - r[0]) + gapMin, r[1], r[2] + (r[2] - r[0]) + gapMin, r[3]]
+            ];
+            for (var ti = 0; ti < tries.length; ti++) {{
+                var t = tries[ti];
+                try {{ return doc.artboards.add(t); }} catch(e1) {{
+                    try {{
+                        var ab = doc.artboards.add();
+                        ab.artboardRect = t;
+                        return ab;
+                    }} catch(e2) {{}}
                 }}
             }}
-            var maxRight = -1e15;
-            var maxTop = -1e15;
-            for (var i = 0; i < doc.artboards.length; i++) {{
-                var r = doc.artboards[i].artboardRect;
-                if (r[2] > maxRight) maxRight = r[2];
-                if (r[1] > maxTop) maxTop = r[1];
-            }}
-            var anchorLeft = maxRight + gapX;
-            var anchorTop = maxTop;
-            var fallback = planGrid(anchorLeft, anchorTop, w, h, total, columns, gapX, gapY);
-            for (var extra = 0; extra < 80 && gridHasOverlap(fallback, {{}}); extra++) {{
-                anchorLeft += stepX;
-                fallback = planGrid(anchorLeft, anchorTop, w, h, total, columns, gapX, gapY);
-            }}
-            return fallback;
+            return null;
         }}
         function hasPlacementBox(item) {{
             var n = item.name || "";
@@ -846,20 +1104,21 @@ def setup_variable_print_slots(app, side: str, count: int) -> None:
             return false;
         }}
         function clearPrintContent(layer) {{
+            if (!layer || !layer.pageItems) return;
             for (var i = layer.pageItems.length - 1; i >= 0; i--) {{
-                var it = layer.pageItems[i];
-                if (hasPlacementBox(it)) continue;
-                it.remove();
+                try {{
+                    var it = layer.pageItems[i];
+                    if (!it) continue;
+                    var n = it.name || "";
+                    if (n.indexOf("_Box_") !== -1) continue;
+                    it.remove();
+                }} catch(e) {{}}
             }}
         }}
         function translateLayerContents(layer, dx, dy) {{
             if (!layer) return;
-            for (var i = 0; i < layer.pageItems.length; i++) {{
-                layer.pageItems[i].translate(dx, dy);
-            }}
-            for (var j = 0; j < layer.layers.length; j++) {{
-                translateLayerContents(layer.layers[j], dx, dy);
-            }}
+            for (var i = 0; i < layer.pageItems.length; i++) layer.pageItems[i].translate(dx, dy);
+            for (var j = 0; j < layer.layers.length; j++) translateLayerContents(layer.layers[j], dx, dy);
         }}
         function centerOf(rect) {{
             return [ (rect[0] + rect[2]) / 2, (rect[1] + rect[3]) / 2 ];
@@ -872,57 +1131,565 @@ def setup_variable_print_slots(app, side: str, count: int) -> None:
                 dup.translate(dx, dy);
             }}
         }}
-
-        app.executeMenuCommand('unlockAll');
-        var baseLayer = null;
-        try {{ baseLayer = doc.layers.getByName(baseLayerName); }} catch(e) {{ return; }}
-        var srcAb = null;
-        try {{ srcAb = doc.artboards.getByName(baseAbName); }} catch(e) {{ return; }}
-
-        baseLayer.locked = false;
-        baseLayer.visible = true;
-        clearPrintContent(baseLayer);
-
-        var origRect = srcAb.artboardRect;
-        var abW = origRect[2] - origRect[0];
-        var abH = origRect[1] - origRect[3];
-        var gapX = Math.max(gapMin, Math.round(abW * 0.08));
-        var gapY = Math.max(gapMin, Math.round(abH * 0.08));
-
-        var reservedNames = {{}};
-        reservedNames[baseAbName] = true;
-        for (var rs = 1; rs <= count; rs++) {{
-            reservedNames[abPrefix + "_" + rs] = true;
+        function boundsOfAllArtboards() {{
+            var left = 1e15, top = -1e15, right = -1e15, bottom = 1e15;
+            for (var bi = 0; bi < doc.artboards.length; bi++) {{
+                var r = doc.artboards[bi].artboardRect;
+                if (r[0] < left) left = r[0];
+                if (r[1] > top) top = r[1];
+                if (r[2] > right) right = r[2];
+                if (r[3] < bottom) bottom = r[3];
+            }}
+            return {{ left: left, top: top, right: right, bottom: bottom }};
+        }}
+        function isPrintGridArtboardName(nm) {{
+            if (!nm) return false;
+            if (nm === baseLayerName || nm === baseAbName) return true;
+            var prefix = abPrefix + "_";
+            if (nm.indexOf(prefix) === 0) {{
+                var rest = nm.substring(prefix.length);
+                return rest.length > 0 && !isNaN(parseInt(rest, 10));
+            }}
+            return false;
+        }}
+        function boundsOfProductArtboards() {{
+            var left = 1e15, top = -1e15, right = -1e15, bottom = 1e15;
+            var found = false;
+            for (var bi = 0; bi < doc.artboards.length; bi++) {{
+                var nm = doc.artboards[bi].name || "";
+                if (isPrintGridArtboardName(nm)) continue;
+                var r = doc.artboards[bi].artboardRect;
+                found = true;
+                if (r[0] < left) left = r[0];
+                if (r[1] > top) top = r[1];
+                if (r[2] > right) right = r[2];
+                if (r[3] < bottom) bottom = r[3];
+            }}
+            if (!found) return boundsOfAllArtboards();
+            return {{ left: left, top: top, right: right, bottom: bottom }};
+        }}
+        function slotRectFromSlot1(slot1Rect, w, h, gapX, gapY, columns, index1Based) {{
+            var idx = index1Based - 1;
+            var col = idx % columns;
+            var row = Math.floor(idx / columns);
+            var left = slot1Rect[0] + col * (w + gapX);
+            var top = slot1Rect[1] - row * (h + gapY);
+            return [left, top, left + w, top - h];
+        }}
+        function findPlacementBoxItem(layer) {{
+            if (!layer || !layer.pageItems) return null;
+            for (var pi = 0; pi < layer.pageItems.length; pi++) {{
+                var it = layer.pageItems[pi];
+                if (hasPlacementBox(it)) return it;
+            }}
+            return null;
+        }}
+        function cellMetrics(srcLayer, s1, slotIdx, columns, gapMin) {{
+            var w = s1[2] - s1[0];
+            var h = s1[1] - s1[3];
+            var abW = (AB_W > 0) ? AB_W : w;
+            var abH = (AB_H > 0) ? AB_H : h;
+            var ox = s1[0], oy = s1[1];
+            if (abW < 1) abW = w;
+            if (abH < 1) abH = h;
+            var gapX = Math.max(gapMin, Math.round(abW * 0.08));
+            var gapY = Math.max(gapMin, Math.round(abH * 0.08));
+            var maxRowsBand = {int(VARIABLE_PRINT_MAX_ROWS)};
+            var idx = slotIdx - 1;
+            var col = idx % columns;
+            var row = Math.floor(idx / columns);
+            var rowBand = Math.floor(row / maxRowsBand);
+            var rowInBand = row % maxRowsBand;
+            var bandW = columns * (abW + gapX);
+            var oxBand = ox + rowBand * (bandW + gapMin * 2);
+            var cellLeft = oxBand + col * (abW + gapX);
+            var cellTop = oy - rowInBand * (abH + gapY);
+            var c1x = ox + abW / 2;
+            var c1y = oy - abH / 2;
+            var cx = cellLeft + abW / 2;
+            var cy = cellTop - abH / 2;
+            return {{
+                cellW: abW,
+                cellH: abH,
+                dx: cx - c1x,
+                dy: cy - c1y,
+                rect: [cellLeft, cellTop, cellLeft + abW, cellTop - abH]
+            }};
         }}
 
-        var planned = findFreeGrid(origRect, count, cols, gapX, gapY, reservedNames);
-        var slot1Rect = planned[0].rect;
-        var dx = slot1Rect[0] - origRect[0];
-        var dy = slot1Rect[1] - origRect[1];
-        if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {{
-            translateLayerContents(baseLayer, dx, dy);
-        }}
-        srcAb.artboardRect = slot1Rect;
-        srcAb.name = abPrefix + "_1";
-        baseLayer.name = baseLayerName + "_1";
+        app.executeMenuCommand("unlockAll");
+        if (findLayerByName(doc, slotLayerName)) return 1;
 
-        var slot1Center = centerOf(slot1Rect);
-        for (var i = 2; i <= count; i++) {{
-            var rect = planned[i - 1].rect;
-            var newAb = doc.artboards.add(rect);
-            newAb.name = abPrefix + "_" + i;
-            var nl = doc.layers.add();
-            nl.name = baseLayerName + "_" + i;
-            nl.zOrder(ZOrderMethod.BRINGTOFRONT);
-            var c = centerOf(rect);
-            var bdx = c[0] - slot1Center[0];
-            var bdy = c[1] - slot1Center[1];
-            var srcLayer = doc.layers.getByName(baseLayerName + "_1");
-            duplicateBoxes(srcLayer, nl, bdx, bdy);
+        if (slotIdx === 1) {{
+            var baseLayer = findLayerByName(doc, baseLayerName);
+            if (!baseLayer) return 0;
+            var srcAb = null;
+            try {{ srcAb = doc.artboards.getByName(baseAbName); }} catch(e) {{ return 0; }}
+            if (!srcAb) return 0;
+            baseLayer.locked = false;
+            baseLayer.visible = true;
+            clearPrintContent(baseLayer);
+            var origRect = srcAb.artboardRect;
+            var abW = origRect[2] - origRect[0];
+            var abH = origRect[1] - origRect[3];
+            if (AB_W > 0 && AB_H > 0) {{
+                abW = AB_W;
+                abH = AB_H;
+            }} else if (CELL_W > 0 && CELL_H > 0) {{
+                abW = CELL_W;
+                abH = CELL_H;
+            }}
+            if (abW < 1) abW = 595.28;
+            if (abH < 1) abH = 841.89;
+            var gapX = Math.max(gapMin, Math.round(abW * 0.08));
+            var gapY = Math.max(gapMin, Math.round(abH * 0.08));
+            var targetRect = origRect;
+            if (total > 5 && !layersOnly && REPOSITION) {{
+                var bb = boundsOfProductArtboards();
+                var anchorLeft = bb.right + gapX;
+                var anchorTop = bb.top;
+                targetRect = slotRectFromSlot1(
+                    [anchorLeft, anchorTop, anchorLeft + abW, anchorTop - abH],
+                    abW, abH, gapX, gapY, cols, 1
+                );
+                translateLayerContents(baseLayer, targetRect[0] - origRect[0], targetRect[1] - origRect[1]);
+            }} else if (total > 5 && layersOnly && REPOSITION) {{
+                var bb2 = boundsOfProductArtboards();
+                var anchorLeft2 = bb2.right + gapX;
+                var anchorTop2 = bb2.top;
+                targetRect = slotRectFromSlot1(
+                    [anchorLeft2, anchorTop2, anchorLeft2 + abW, anchorTop2 - abH],
+                    abW, abH, gapX, gapY, cols, 1
+                );
+                translateLayerContents(baseLayer, targetRect[0] - origRect[0], targetRect[1] - origRect[1]);
+            }} else if (AB_W > 0 && AB_H > 0 && !layersOnly) {{
+                targetRect = [origRect[0], origRect[1], origRect[0] + abW, origRect[1] - abH];
+            }}
+            if (!layersOnly) {{
+                srcAb.artboardRect = targetRect;
+            }}
+            srcAb.name = slotAbName;
+            baseLayer.name = slotLayerName;
+            return 1;
+        }}
+
+        var srcLayer = findLayerByName(doc, baseLayerName + "_1");
+        var srcAb1 = null;
+        try {{ srcAb1 = doc.artboards.getByName(abPrefix + "_1"); }} catch(e) {{ return 0; }}
+        if (!srcLayer || !srcAb1) return 0;
+        var s1 = srcAb1.artboardRect;
+        var m = cellMetrics(srcLayer, s1, slotIdx, cols, gapMin);
+        if (!layersOnly) {{
+            var gapX2 = Math.max(gapMin, Math.round(m.cellW * 0.08));
+            var gapY2 = Math.max(gapMin, Math.round(m.cellH * 0.08));
+            var newAb = addArtboardSafe(m.rect, m.cellW, m.cellH, gapX2, gapY2);
+            if (!newAb) return "ab_fail:" + slotIdx;
+            newAb.name = slotAbName;
+        }}
+        var printHost = getPrintLayerContainer(srcLayer);
+        addPrintLayer(printHost, slotLayerName);
+        return "1";
+    }})();
+    """
+    try:
+        raw = str(app.DoJavaScript(jsx)).strip()
+        if raw == "1":
+            return True
+        if raw.startswith("ab_fail:"):
+            print(f"   > Slot {slot_idx}: artboard create failed at grid position")
+        return False
+    except Exception as e:
+        print(f"   > JSX warning (slot {slot_idx}): {e}")
+        return False
+
+
+def setup_variable_print_slots(
+    app,
+    side: str,
+    count: int,
+    doc_name: str = "",
+    layers_only: bool = False,
+    cell_w: float = 0,
+    cell_h: float = 0,
+    ab_w: float = 0,
+    ab_h: float = 0,
+    reposition_grid: bool = True,
+    anchor_only: bool = False,
+) -> int:
+    """יוצר שכבות + artboards Print_Back_1..N — גודל תא = תבנית (cell_w/h)."""
+    if count < 1:
+        return 0
+    cfg = VARIABLE_SIDE_BASE.get(side)
+    if not cfg:
+        return 0
+    cols = variable_grid_columns(count) if count > 5 else min(VARIABLE_PRINT_COLS, max(1, count))
+    rows = (count + cols - 1) // cols
+    gap_min = VARIABLE_PRINT_GAP_MIN
+    mode = "layers-only, 1 artboard" if layers_only else f"{cols} cols x {rows} rows, gap>={gap_min}pt"
+    if cell_w > 0 and cell_h > 0:
+        mode += f", artboard={ab_w:.0f}x{ab_h:.0f}pt" if ab_w > 0 else f", cell={cell_w:.0f}x{cell_h:.0f}pt"
+    if anchor_only:
+        mode += ", anchor slot 1"
+    print(f"   > Variable grid {side}: {count} slots ({mode})")
+    if doc_name and not activate_document(app, doc_name):
+        print(f"   > ERROR: document not active: {doc_name}")
+        return 0
+    if layers_only:
+        cleanup_variable_layers_only_extras(app, side, doc_name)
+    last_slot = 1 if anchor_only else count
+    ready = 0
+    for slot in range(1, last_slot + 1):
+        if ensure_variable_print_slot(
+            app,
+            side,
+            slot,
+            count,
+            doc_name,
+            layers_only,
+            cell_w,
+            cell_h,
+            ab_w,
+            ab_h,
+            reposition_grid,
+        ):
+            ready += 1
+        elif slot == 1:
+            print(f"   > ERROR: failed to create slot 1 ({cfg['layer']}_1)")
+            return 0
+    if anchor_only:
+        print(f"   > Variable grid {side}: anchor ready — up to {count} pages on demand")
+        return ready
+    if ready < count:
+        print(f"   > Variable grid {side}: only {ready}/{count} slots created")
+    else:
+        print(f"   > Variable grid {side}: {ready} slots ready")
+    return ready
+
+
+def remove_variable_placement_boxes(
+    app, side: str, count: int, doc_name: str = ""
+) -> None:
+    """מוחק תיבות _Box_ מיותרות מכל שכבות ההדפסה המשתנה."""
+    if count < 1:
+        return
+    cfg = VARIABLE_SIDE_BASE.get(side)
+    if not cfg:
+        return
+    base_layer = cfg["layer"]
+    if doc_name and not activate_document(app, doc_name):
+        return
+    jsx = f"""
+    #target illustrator
+    (function() {{
+        var doc = app.activeDocument;
+        var base = {json.dumps(base_layer)};
+        var total = {int(count)};
+        function findLayerByName(container, name) {{
+            if (!container || !container.layers) return null;
+            for (var li = 0; li < container.layers.length; li++) {{
+                var lyr = container.layers[li];
+                if (lyr.name === name) return lyr;
+                var sub = findLayerByName(lyr, name);
+                if (sub) return sub;
+            }}
+            return null;
+        }}
+        function isBoxItem(item) {{
+            try {{
+                var n = item.name || "";
+                if (n.indexOf("_Box_") !== -1) return true;
+                if (item.typename === "GroupItem" && item.pageItems) {{
+                    for (var k = 0; k < item.pageItems.length; k++) {{
+                        if (isBoxItem(item.pageItems[k])) return true;
+                    }}
+                }}
+            }} catch(e) {{}}
+            return false;
+        }}
+        function removeBoxesFromLayer(layer) {{
+            if (!layer || !layer.pageItems) return;
+            for (var pi = layer.pageItems.length - 1; pi >= 0; pi--) {{
+                try {{
+                    if (isBoxItem(layer.pageItems[pi])) layer.pageItems[pi].remove();
+                }} catch(e) {{}}
+            }}
+            for (var si = 0; si < layer.layers.length; si++) removeBoxesFromLayer(layer.layers[si]);
+        }}
+        app.executeMenuCommand("unlockAll");
+        removeBoxesFromLayer(findLayerByName(doc, base));
+        for (var i = 1; i <= total; i++) {{
+            removeBoxesFromLayer(findLayerByName(doc, base + "_" + i));
         }}
     }})();
     """
     run_jsx(app, jsx)
+
+
+def cleanup_stray_print_on_simulation(
+    app, prefix: str, doc_name: str = ""
+) -> None:
+    """מסיר הדפסות זולגות משכבת ההדמיה — קבוצות P_X_s* וכפילויות."""
+    if doc_name and not activate_document(app, doc_name):
+        return
+    safe_prefix = prefix.replace("\\", "\\\\").replace('"', '\\"')
+    side_map = {"F": "Front", "B": "Back", "RS": "Right_Sleeve", "LS": "Left_Sleeve"}
+    sim_side = side_map.get(prefix, "Back")
+    jsx = f"""
+    #target illustrator
+    (function() {{
+        var doc = app.activeDocument;
+        var printPrefix = "P_{safe_prefix}_s";
+        var simSide = "{sim_side}";
+        function removePrintGroups(container) {{
+            if (!container || !container.pageItems) return;
+            for (var pi = container.pageItems.length - 1; pi >= 0; pi--) {{
+                try {{
+                    var it = container.pageItems[pi];
+                    var nm = it.name || "";
+                    if (nm.indexOf(printPrefix) === 0 || nm.indexOf("P_{safe_prefix}_") === 0) {{
+                        it.remove();
+                    }}
+                }} catch(e) {{}}
+            }}
+            if (container.layers) {{
+                for (var li = 0; li < container.layers.length; li++) {{
+                    removePrintGroups(container.layers[li]);
+                }}
+            }}
+        }}
+        function dedupeSimPlacement() {{
+            try {{
+                var simLayer = doc.layers.getByName("Simulation");
+                var target = simLayer.layers.getByName("S_Placement_" + simSide);
+                var keepers = [];
+                for (var i = target.pageItems.length - 1; i >= 0; i--) {{
+                    try {{
+                        var it = target.pageItems[i];
+                        var nm = it.name || "";
+                        if (nm.indexOf("_Box_") !== -1) continue;
+                        if (nm.indexOf("P_") === 0) {{ it.remove(); continue; }}
+                        keepers.push(it);
+                    }} catch(e) {{}}
+                }}
+                for (var k = 1; k < keepers.length; k++) {{
+                    try {{ keepers[k].remove(); }} catch(e2) {{}}
+                }}
+            }} catch(e) {{}}
+        }}
+        try {{
+            var simLayer = doc.layers.getByName("Simulation");
+            removePrintGroups(simLayer);
+        }} catch(e) {{}}
+        dedupeSimPlacement();
+    }})();
+    """
+    run_jsx(app, jsx)
+
+
+def cleanup_orphan_variable_print_artboards(
+    app, side: str, doc_name: str = ""
+) -> None:
+    """מסיר artboard/שכבת Print_Back יתומים אחרי ש-Print_Back_1 קיים (מונע כפילות דף 1)."""
+    cfg = VARIABLE_SIDE_BASE.get(side)
+    if not cfg:
+        return
+    base_layer = cfg["layer"]
+    base_ab = cfg["artboard"]
+    if doc_name and not activate_document(app, doc_name):
+        return
+    jsx = f"""
+    #target illustrator
+    (function() {{
+        var doc = app.activeDocument;
+        var baseLayer = {json.dumps(base_layer)};
+        var baseAb = {json.dumps(base_ab)};
+        function findLayerByName(container, name) {{
+            if (!container || !container.layers) return null;
+            for (var li = 0; li < container.layers.length; li++) {{
+                var lyr = container.layers[li];
+                if (lyr.name === name) return lyr;
+                var sub = findLayerByName(lyr, name);
+                if (sub) return sub;
+            }}
+            return null;
+        }}
+        var has1 = false;
+        try {{
+            doc.artboards.getByName(baseLayer + "_1");
+            has1 = true;
+        }} catch(e) {{}}
+        if (!has1) return;
+        for (var ai = doc.artboards.length - 1; ai >= 0; ai--) {{
+            if (doc.artboards[ai].name === baseAb) {{
+                try {{ doc.artboards.remove(ai); }} catch(e2) {{}}
+            }}
+        }}
+        var orphan = findLayerByName(doc, baseLayer);
+        if (orphan && orphan.name === baseLayer) {{
+            try {{ orphan.remove(); }} catch(e3) {{}}
+        }}
+    }})();
+    """
+    run_jsx(app, jsx)
+
+
+def cleanup_variable_layers_only_extras(
+    app, side: str, doc_name: str = ""
+) -> None:
+    """מוחק artboards יתומים Print_*_2..N מריצות קודמות (layers-only = artboard _1 בלבד)."""
+    cfg = VARIABLE_SIDE_BASE.get(side)
+    if not cfg:
+        return
+    ab_prefix = cfg["layer"]
+    if doc_name and not activate_document(app, doc_name):
+        return
+    safe_prefix = json.dumps(ab_prefix)
+    jsx = f"""
+    #target illustrator
+    (function() {{
+        var doc = app.activeDocument;
+        var abPrefix = {safe_prefix};
+        for (var i = doc.artboards.length - 1; i >= 0; i--) {{
+            var nm = doc.artboards[i].name;
+            if (nm.indexOf(abPrefix + "_") !== 0) continue;
+            var m = nm.match(/_(\\d+)$/);
+            if (m && parseInt(m[1], 10) > 1) {{
+                try {{ doc.artboards.remove(i); }} catch(e) {{}}
+            }}
+        }}
+    }})();
+    """
+    run_jsx(app, jsx)
+
+
+def expand_variable_layers_only_artboard(
+    app,
+    side: str,
+    count: int,
+    doc_name: str = "",
+    cell_w: float = 0,
+    cell_h: float = 0,
+) -> None:
+    """מרחיב artboard _1 לכיסוי רשת התוכן (גודל תיאורטי + bounds בפועל)."""
+    if count < 1:
+        return
+    cfg = VARIABLE_SIDE_BASE.get(side)
+    if not cfg:
+        return
+    ab_prefix = cfg["layer"]
+    cols = variable_grid_columns(count) if count > 5 else min(VARIABLE_PRINT_COLS, max(1, count))
+    gap_min = VARIABLE_PRINT_GAP_MIN
+    if doc_name and not activate_document(app, doc_name):
+        return
+    safe_prefix = json.dumps(ab_prefix)
+    jsx = f"""
+    #target illustrator
+    (function() {{
+        var doc = app.activeDocument;
+        var abPrefix = {safe_prefix};
+        var total = {int(count)};
+        var COLS = {int(cols)};
+        var CELL_W = {float(cell_w)};
+        var CELL_H = {float(cell_h)};
+        var gapMin = {int(gap_min)};
+        var pad = 30;
+        function findPlacementBoxItem(layer) {{
+            if (!layer || !layer.pageItems) return null;
+            for (var pi = 0; pi < layer.pageItems.length; pi++) {{
+                var it = layer.pageItems[pi];
+                if (hasPlacementBox(it)) return it;
+            }}
+            return null;
+        }}
+        function findLayerByName(container, name) {{
+            if (!container || !container.layers) return null;
+            for (var li = 0; li < container.layers.length; li++) {{
+                var lyr = container.layers[li];
+                if (lyr.name === name) return lyr;
+                var sub = findLayerByName(lyr, name);
+                if (sub) return sub;
+            }}
+            return null;
+        }}
+        function hasPlacementBox(item) {{
+            var n = item.name || "";
+            if (n.indexOf("_Box_") !== -1) return true;
+            if (item.typename === "GroupItem" && item.pageItems) {{
+                for (var k = 0; k < item.pageItems.length; k++) {{
+                    if (hasPlacementBox(item.pageItems[k])) return true;
+                }}
+            }}
+            return false;
+        }}
+        function growBounds(b, item) {{
+            try {{
+                var vb = item.visibleBounds;
+                if (vb[0] < b.left) b.left = vb[0];
+                if (vb[1] > b.top) b.top = vb[1];
+                if (vb[2] > b.right) b.right = vb[2];
+                if (vb[3] < b.bottom) b.bottom = vb[3];
+            }} catch(e) {{}}
+        }}
+        function scanLayer(layer, b) {{
+            if (!layer) return;
+            for (var pi = 0; pi < layer.pageItems.length; pi++) {{
+                var it = layer.pageItems[pi];
+                if (hasPlacementBox(it)) continue;
+                growBounds(b, it);
+            }}
+            for (var si = 0; si < layer.layers.length; si++) scanLayer(layer.layers[si], b);
+        }}
+        var ab1 = null;
+        try {{ ab1 = doc.artboards.getByName(abPrefix + "_1"); }} catch(e) {{ return; }}
+        if (!ab1) return;
+        var s1 = ab1.artboardRect;
+        var b = {{ left: s1[0], top: s1[1], right: s1[2], bottom: s1[3] }};
+        for (var i = 1; i <= total; i++) {{
+            scanLayer(findLayerByName(doc, abPrefix + "_" + i), b);
+        }}
+        var originX = s1[0], originY = s1[1];
+        var layer1 = findLayerByName(doc, abPrefix + "_1");
+        var box1 = findPlacementBoxItem(layer1);
+        if (box1) {{
+            var bb1 = box1.visibleBounds;
+            originX = bb1[0];
+            originY = bb1[1];
+        }}
+        var thRight = b.right, thBottom = b.bottom;
+        if (CELL_W > 0 && CELL_H > 0) {{
+            var rows = Math.ceil(total / COLS);
+            var gapX = Math.max(gapMin, Math.round(CELL_W * 0.08));
+            var gapY = Math.max(gapMin, Math.round(CELL_H * 0.08));
+            thRight = originX + COLS * CELL_W + (COLS - 1) * gapX;
+            thBottom = originY - (rows * CELL_H + (rows - 1) * gapY);
+        }}
+        if (b.right <= b.left + 1 && thRight <= originX + 1) return;
+        var newLeft = Math.min(s1[0], originX, b.left) - pad;
+        var newTop = Math.max(s1[1], originY, b.top) + pad;
+        var newRight = Math.max(s1[2], thRight, b.right) + pad;
+        var newBottom = Math.min(s1[3], thBottom, b.bottom) - pad;
+        if (newRight <= newLeft + 1 || newTop <= newBottom + 1) return;
+        try {{
+            ab1.artboardRect = [newLeft, newTop, newRight, newBottom];
+            var w = newRight - newLeft;
+            var h = newTop - newBottom;
+            return "ok|" + Math.round(w) + "|" + Math.round(h);
+        }} catch(e1) {{
+            return "fail|" + e1;
+        }}
+    }})();
+    """
+    try:
+        raw = str(app.DoJavaScript(jsx)).strip()
+        if raw.startswith("ok|"):
+            parts = raw.split("|")
+            if len(parts) >= 3:
+                print(f"   > Expanded {ab_prefix}_1 artboard to {parts[1]}x{parts[2]} pt")
+        elif raw.startswith("fail|"):
+            print(f"   > JSX warning (expand artboard): {raw[5:]}")
+    except Exception as e:
+        print(f"   > JSX warning (expand artboard): {e}")
+
 
 
 def apply_text_overrides_in_layer(app, layer_name: str, overrides: dict) -> None:
@@ -980,6 +1747,164 @@ def apply_text_overrides_in_layer(app, layer_name: str, overrides: dict) -> None
     run_jsx(app, jsx)
 
 
+def illustrator_purge(app) -> None:
+    """מנקה cache של Illustrator — מונע קריסות אחרי עשרות פעולות."""
+    jsx = """
+    #target illustrator
+    (function() {
+        try { app.redraw(); } catch(e) {}
+        try { app.executeMenuCommand("purge"); } catch(e2) {}
+    })();
+    """
+    try:
+        app.DoJavaScript(jsx)
+    except Exception:
+        pass
+
+
+def close_stray_template_documents(
+    app, template_path: str, product_doc_name: str = ""
+) -> None:
+    """סוגר עותקי תבנית פתוחים שנשארו מהרצות קודמות."""
+    base = os.path.splitext(os.path.basename(template_path))[0]
+    safe_base = json.dumps(base)
+    safe_prod = json.dumps(product_doc_name or "")
+    jsx = f"""
+    #target illustrator
+    (function() {{
+        var base = {safe_base};
+        var prod = {safe_prod};
+        for (var i = app.documents.length - 1; i >= 0; i--) {{
+            try {{
+                var dn = app.documents[i].name;
+                if (prod && dn === prod) continue;
+                if (dn.indexOf(base) === 0) {{
+                    app.documents[i].close(SaveOptions.DONOTSAVECHANGES);
+                }}
+            }} catch(e) {{}}
+        }}
+    }})();
+    """
+    try:
+        app.DoJavaScript(jsx)
+    except Exception:
+        pass
+
+
+def open_variable_template_session(
+    app, template_path: str, product_doc_name: str = ""
+) -> str:
+    """פותח תבנית AI פעם אחת לכל variants — בלי open/close בכל variant."""
+    if not template_path or not os.path.exists(template_path):
+        return ""
+    close_stray_template_documents(app, template_path, product_doc_name)
+    safe_path = json.dumps(template_path.replace("\\", "/"))
+    jsx = f"""
+    #target illustrator
+    (function() {{
+        var f = new File({safe_path});
+        if (!f.exists) return "";
+        var doc = app.open(f);
+        return doc ? doc.name : "";
+    }})();
+    """
+    try:
+        name = str(app.DoJavaScript(jsx)).strip()
+        if name and name != "undefined":
+            return name
+    except Exception as e:
+        print(f"   > Template session open failed: {e}")
+    return ""
+
+
+def close_variable_template_session(app, template_doc_name: str) -> None:
+    if not template_doc_name:
+        return
+    safe = json.dumps(template_doc_name)
+    jsx = f"""
+    #target illustrator
+    (function() {{
+        var want = {safe};
+        for (var i = 0; i < app.documents.length; i++) {{
+            if (app.documents[i].name === want) {{
+                try {{ app.documents[i].close(SaveOptions.DONOTSAVECHANGES); }} catch(e) {{}}
+                return;
+            }}
+        }}
+    }})();
+    """
+    try:
+        app.DoJavaScript(jsx)
+    except Exception:
+        pass
+
+
+def capture_template_text_snapshot(app, template_doc_name: str) -> dict:
+    """שומר תוכן TEXT frames מקורי לשחזור בין variants."""
+    if not template_doc_name or not activate_document(app, template_doc_name):
+        return {}
+    safe = json.dumps(template_doc_name)
+    jsx = f"""
+    #target illustrator
+    (function() {{
+        var doc = app.activeDocument;
+        var snap = {{}};
+        function isVarName(nm) {{
+            if (!nm) return false;
+            if (/^(TEXT|NUM|NUMBER)[_]?\\d+$/i.test(nm)) return true;
+            if (/^TEXT_(NAME|NUMBER|NUM\\d+)$/i.test(nm)) return true;
+            return false;
+        }}
+        function walk(root) {{
+            if (!root) return;
+            try {{
+                if (root.textFrames) {{
+                    for (var t = 0; t < root.textFrames.length; t++) {{
+                        try {{
+                            var tf = root.textFrames[t];
+                            var nm = tf.name || "";
+                            if (isVarName(nm)) snap[nm] = String(tf.contents);
+                        }} catch(e) {{}}
+                    }}
+                }}
+            }} catch(e) {{}}
+            try {{
+                if (root.pageItems) {{
+                    for (var i = 0; i < root.pageItems.length; i++) {{
+                        try {{
+                            if (root.pageItems[i].typename === "GroupItem") walk(root.pageItems[i]);
+                        }} catch(e2) {{}}
+                    }}
+                }}
+            }} catch(e) {{}}
+            try {{
+                if (root.layers) {{
+                    for (var j = 0; j < root.layers.length; j++) walk(root.layers[j]);
+                }}
+            }} catch(e) {{}}
+        }}
+        walk(doc);
+        var parts = [];
+        for (var k in snap) {{
+            if (snap.hasOwnProperty(k)) parts.push(k + "\\t" + snap[k]);
+        }}
+        return parts.join("\\n");
+    }})();
+    """
+    try:
+        raw = str(app.DoJavaScript(jsx)).strip()
+        result: dict = {}
+        for line in raw.split("\n"):
+            if "\t" not in line:
+                continue
+            key, val = line.split("\t", 1)
+            result[key] = val
+        return result
+    except Exception as e:
+        print(f"   > Template snapshot failed: {e}")
+        return {}
+
+
 def place_variable_template_variant(
     app,
     template_path: str,
@@ -998,6 +1923,14 @@ def place_variable_template_variant(
     category: str = "A4",
     shared_template: bool = True,
     slot_id: int = 1,
+    layers_only: bool = False,
+    grid_cols: int = VARIABLE_PRINT_COLS,
+    total_slots: int = 1,
+    sim_only: bool = False,
+    center_on_artboard: bool = False,
+    template_doc_name: str = "",
+    keep_template_open: bool = False,
+    text_snapshot: Optional[dict] = None,
 ) -> float:
     """מלביש תוכן מתבנית AI ב-1:1 — שומר גופן, גודל ומיקום יחסי בתוך הארטבורד (בלי scale ובלי מירכוז)."""
     if not template_path or not os.path.exists(template_path):
@@ -1033,14 +1966,33 @@ def place_variable_template_variant(
     shared_tpl = "true" if shared_template else "false"
     group_name = f"P_{prefix}_s{int(slot_id)}"
     safe_group = group_name.replace("\\", "\\\\").replace('"', '\\"')
+    cols = min(int(grid_cols), max(1, int(total_slots)))
+    layers_only_js = "true" if layers_only else "false"
+    sim_only_js = "true" if sim_only else "false"
+    center_js = "true" if center_on_artboard else "false"
+    safe_tpl_doc = json.dumps(template_doc_name or "")
+    keep_tpl_js = "true" if keep_template_open else "false"
+    tpl_base = os.path.splitext(os.path.basename(template_path))[0]
+    safe_tpl_base = json.dumps(tpl_base)
+    snap_js = json.dumps(text_snapshot or {}, ensure_ascii=False)
     jsx = f"""
     #target illustrator
     (function() {{
         var TEMPLATE_PATH = "{safe_tpl}";
+        var TEMPLATE_DOC_NAME = {safe_tpl_doc};
+        var TEMPLATE_BASE = {safe_tpl_base};
+        var KEEP_TEMPLATE_OPEN = {keep_tpl_js};
+        var TEXT_SNAPSHOT = {snap_js};
         var PRODUCT_DOC_NAME = "{safe_doc}";
         var LAYER_NAME = "{safe_layer}";
         var ARTBOARD_NAME = "{safe_ab}";
         var PREFIX = "{prefix}";
+        var SLOT_IDX = {int(slot_id)};
+        var GRID_COLS = {cols};
+        var GRID_GAP = {int(VARIABLE_PRINT_GAP_MIN)};
+        var LAYERS_ONLY = {layers_only_js};
+        var SIM_ONLY = {sim_only_js};
+        var CENTER_ON_ARTBOARD = {center_js};
         var TEXT_OVERRIDES = {text_js};
         var IMAGE_FILES = {img_js};
         var IMAGE_RASTER = {img_raster_js};
@@ -1053,6 +2005,17 @@ def place_variable_template_variant(
         var CATEGORY = {safe_cat};
         var SHARED_TEMPLATE = {shared_tpl};
         var GROUP_NAME = "{safe_group}";
+
+        function findLayerByName(container, name) {{
+            if (!container || !container.layers) return null;
+            for (var li = 0; li < container.layers.length; li++) {{
+                var lyr = container.layers[li];
+                if (lyr.name === name) return lyr;
+                var sub = findLayerByName(lyr, name);
+                if (sub) return sub;
+            }}
+            return null;
+        }}
 
         function findNamedItem(container, name) {{
             try {{
@@ -1190,6 +2153,7 @@ def place_variable_template_variant(
             }};
             try {{ saved.baselineShift = ca.baselineShift; }} catch(e) {{}}
             try {{ saved.dir = ca.direction; }} catch(e) {{}}
+            try {{ saved.fontName = ca.textFont.name; }} catch(e) {{}}
             return saved;
         }}
         function captureTextStyle(tf) {{
@@ -1204,6 +2168,7 @@ def place_variable_template_variant(
                 var ca = tr.characterAttributes;
                 var pa = tr.paragraphAttributes;
                 saved.font = ca.textFont;
+                try {{ saved.fontName = ca.textFont.name; }} catch(e2) {{}}
                 saved.size = ca.size;
                 saved.leading = ca.leading;
                 saved.tracking = ca.tracking;
@@ -1291,6 +2256,9 @@ def place_variable_template_variant(
             var ca = charItem.characterAttributes;
             try {{
                 if (saved.font) ca.textFont = saved.font;
+                else if (saved.fontName) {{
+                    try {{ ca.textFont = app.textFonts.getByName(saved.fontName); }} catch(e2) {{}}
+                }}
                 if (saved.size) ca.size = saved.size;
                 if (saved.leading) ca.leading = saved.leading;
                 ca.tracking = saved.tracking;
@@ -1389,19 +2357,26 @@ def place_variable_template_variant(
             lockVisualCenter(tf, centerBefore.x, centerBefore.y);
         }}
         function forEachTextFrame(root, fn) {{
+            if (!root) return;
             try {{
                 if (root.textFrames) {{
                     for (var t = 0; t < root.textFrames.length; t++) fn(root.textFrames[t]);
                 }}
             }} catch(e) {{}}
-            if (root.pageItems) {{
-                for (var i = 0; i < root.pageItems.length; i++) {{
-                    if (root.pageItems[i].typename === "GroupItem") forEachTextFrame(root.pageItems[i], fn);
+            try {{
+                if (root.pageItems) {{
+                    for (var i = 0; i < root.pageItems.length; i++) {{
+                        try {{
+                            if (root.pageItems[i].typename === "GroupItem") forEachTextFrame(root.pageItems[i], fn);
+                        }} catch(e2) {{}}
+                    }}
                 }}
-            }}
-            if (root.layers) {{
-                for (var j = 0; j < root.layers.length; j++) forEachTextFrame(root.layers[j], fn);
-            }}
+            }} catch(e) {{}}
+            try {{
+                if (root.layers) {{
+                    for (var j = 0; j < root.layers.length; j++) forEachTextFrame(root.layers[j], fn);
+                }}
+            }} catch(e) {{}}
         }}
         function isActiveOverrideKey(name, overrides) {{
             if (overrides[name]) return true;
@@ -1444,7 +2419,11 @@ def place_variable_template_variant(
             var unique = [];
             for (var ui = 0; ui < candidates.length; ui++) {{
                 var c = candidates[ui];
-                if (unique.indexOf(c) < 0) unique.push(c);
+                var seen = false;
+                for (var uj = 0; uj < unique.length; uj++) {{
+                    if (unique[uj] === c) {{ seen = true; break; }}
+                }}
+                if (!seen) unique.push(c);
             }}
             return unique;
         }}
@@ -1485,11 +2464,15 @@ def place_variable_template_variant(
             }}
         }}
         function ensureSinglePrintOnLayer(layer, keepName) {{
+            if (!layer || !layer.pageItems) return;
             var nonBox = [];
             for (var i = 0; i < layer.pageItems.length; i++) {{
-                var it = layer.pageItems[i];
-                if ((it.name || "").indexOf("_Box_") !== -1) continue;
-                nonBox.push(it);
+                try {{
+                    var it = layer.pageItems[i];
+                    if (!it) continue;
+                    if ((it.name || "").indexOf("_Box_") !== -1) continue;
+                    nonBox.push(it);
+                }} catch(e) {{}}
             }}
             if (nonBox.length <= 1) {{
                 if (nonBox.length === 1) nonBox[0].name = keepName;
@@ -1634,6 +2617,29 @@ def place_variable_template_variant(
             var abCy = abRect[1] - (abRect[1] - abRect[3]) / 2;
             item.translate(abCx - icx, abCy - icy);
         }}
+        function fitAndCenterOnArtboard(item, abRect, marginPt) {{
+            var margin = marginPt || 24;
+            var abW = (abRect[2] - abRect[0]) - margin * 2;
+            var abH = (abRect[1] - abRect[3]) - margin * 2;
+            if (abW < 1 || abH < 1) {{
+                alignCenterToArtboard(item, abRect);
+                return;
+            }}
+            var b = item.visibleBounds;
+            var iw = b[2] - b[0];
+            var ih = b[1] - b[3];
+            if (iw < 1 || ih < 1) return;
+            var scale = Math.min(abW / iw, abH / ih);
+            if (scale > 1) scale = 1;
+            if (Math.abs(scale - 1) > 0.001) {{
+                try {{
+                    item.resize(scale * 100, scale * 100, true, true, true, true, scale * 100, Transformation.CENTER);
+                }} catch(eR) {{
+                    item.resize(scale * 100, scale * 100);
+                }}
+            }}
+            alignCenterToArtboard(item, abRect);
+        }}
         function captureArtboardOffset(item, abRect) {{
             var b = item.visibleBounds;
             return {{
@@ -1706,6 +2712,29 @@ def place_variable_template_variant(
             }}
             return null;
         }}
+        function closeStrayTemplateDocs() {{
+            for (var i = app.documents.length - 1; i >= 0; i--) {{
+                try {{
+                    var dn = app.documents[i].name;
+                    if (dn === PRODUCT_DOC_NAME) continue;
+                    if (TEMPLATE_DOC_NAME && dn === TEMPLATE_DOC_NAME) continue;
+                    if (dn.indexOf(TEMPLATE_BASE) === 0) {{
+                        app.documents[i].close(SaveOptions.DONOTSAVECHANGES);
+                    }}
+                }} catch(e) {{}}
+            }}
+        }}
+        function restoreTextSnapshot(doc) {{
+            for (var k in TEXT_SNAPSHOT) {{
+                if (!TEXT_SNAPSHOT.hasOwnProperty(k)) continue;
+                var tf = findTextFrameForOverride(doc, k);
+                if (tf) {{
+                    try {{ setTextPreserveStyle(tf, TEXT_SNAPSHOT[k]); }} catch(e) {{
+                        try {{ tf.contents = TEXT_SNAPSHOT[k]; }} catch(e2) {{}}
+                    }}
+                }}
+            }}
+        }}
 
         var prodDoc = findProductDoc(PRODUCT_DOC_NAME);
         if (!prodDoc) {{
@@ -1720,7 +2749,15 @@ def place_variable_template_variant(
         if (!prodDoc) return -1;
 
         app.activeDocument = prodDoc;
-        var tplDoc = app.open(new File(TEMPLATE_PATH));
+        var tplDoc = null;
+        if (TEMPLATE_DOC_NAME) {{
+            tplDoc = findProductDoc(TEMPLATE_DOC_NAME);
+            if (!tplDoc) return -7;
+        }} else {{
+            closeStrayTemplateDocs();
+            tplDoc = app.open(new File(TEMPLATE_PATH));
+        }}
+        if (!tplDoc) return -7;
         app.activeDocument = tplDoc;
         app.executeMenuCommand("unlockAll");
 
@@ -1728,6 +2765,8 @@ def place_variable_template_variant(
         var tplAb = tplDoc.artboards[tplAbIdx].artboardRect;
         var tplW = tplAb[2] - tplAb[0];
         var tplH = tplAb[1] - tplAb[3];
+
+        restoreTextSnapshot(tplDoc);
 
         var textKeys = [];
         var hasOverrides = false;
@@ -1740,7 +2779,7 @@ def place_variable_template_variant(
                 textKeys.push(tf.name || tk);
             }}
         }}
-        if (SHARED_TEMPLATE === "true" && hasOverrides) {{
+        if (SHARED_TEMPLATE && hasOverrides) {{
             removeUnusedNamedTexts(tplDoc, TEXT_OVERRIDES);
         }}
         for (var ik in IMAGE_FILES) {{
@@ -1765,7 +2804,7 @@ def place_variable_template_variant(
         copyRoot.name = GROUP_NAME;
         var layoutOff = captureArtboardOffset(copyRoot, tplAb);
 
-        if (DO_PRINT_COLOR === "true") {{
+        if (SIM_ONLY !== true && DO_PRINT_COLOR) {{
             var pc = makePrintColor(PRINT_R, PRINT_G, PRINT_B);
             colRecPrint(copyRoot, pc);
         }}
@@ -1773,12 +2812,60 @@ def place_variable_template_variant(
         tplDoc.selection = null;
         copyRoot.selected = true;
         app.executeMenuCommand("copy");
-        tplDoc.close(SaveOptions.DONOTSAVECHANGES);
+        if (!KEEP_TEMPLATE_OPEN) {{
+            tplDoc.close(SaveOptions.DONOTSAVECHANGES);
+        }}
+
+        prodDoc = findProductDoc(PRODUCT_DOC_NAME);
+        if (!prodDoc) {{
+            for (var di = 0; di < app.documents.length; di++) {{
+                var dn = app.documents[di].name;
+                if (dn === PRODUCT_DOC_NAME || dn.indexOf(PRODUCT_DOC_NAME.replace(".ai", "")) !== -1) {{
+                    prodDoc = app.documents[di];
+                    break;
+                }}
+            }}
+        }}
+        if (!prodDoc && app.documents.length > 0) prodDoc = app.documents[0];
+        if (!prodDoc) return -1;
 
         app.activeDocument = prodDoc;
         app.executeMenuCommand("unlockAll");
-        var targetLayer = null;
-        try {{ targetLayer = prodDoc.layers.getByName(LAYER_NAME); }} catch(e) {{ return -3; }}
+
+        if (SIM_ONLY) {{
+            try {{
+                var simLayerOnly = prodDoc.layers.getByName("Simulation");
+                var sideNameOnly = "Back";
+                if (PREFIX === "F") sideNameOnly = "Front";
+                else if (PREFIX === "RS") sideNameOnly = "Right_Sleeve";
+                else if (PREFIX === "LS") sideNameOnly = "Left_Sleeve";
+                var simTargetOnly = simLayerOnly.layers.getByName("S_Placement_" + sideNameOnly);
+                simLayerOnly.visible = true;
+                simTargetOnly.visible = true;
+                simTargetOnly.locked = false;
+                prodDoc.activeLayer = simTargetOnly;
+                prodDoc.selection = null;
+                app.executeMenuCommand("pasteInPlace");
+                var simOnlyItem = null;
+                if (prodDoc.selection && prodDoc.selection.length > 0) {{
+                    simOnlyItem = prodDoc.selection[0];
+                }}
+                if (!simOnlyItem) return -4;
+                simOnlyItem.hidden = false;
+                placeSimExactFromTemplate(simOnlyItem, layoutOff, tplW, tplH, PREFIX, CATEGORY);
+                if (DO_SIM_COLOR) {{
+                    var scOnly = makePrintColor(SIM_R, SIM_G, SIM_B);
+                    colRecPrint(simOnlyItem, scOnly);
+                }}
+                simOnlyItem.name = "";
+                var simB = simOnlyItem.visibleBounds;
+                return simB[2] - simB[0];
+            }} catch(eSim) {{
+                return -4;
+            }}
+        }}
+
+        var targetLayer = findLayerByName(app.activeDocument, LAYER_NAME);
         if (!targetLayer) return -3;
         targetLayer.locked = false;
         targetLayer.visible = true;
@@ -1803,13 +2890,37 @@ def place_variable_template_variant(
         }}
         if (!placed) return -4;
 
-        placed.name = GROUP_NAME;
-        placed.locked = false;
-        placed.hidden = false;
+        try {{
+            placed.name = GROUP_NAME;
+            placed.locked = false;
+            placed.hidden = false;
+        }} catch(eName) {{
+            placed = null;
+            for (var pi2 = targetLayer.pageItems.length - 1; pi2 >= 0; pi2--) {{
+                try {{
+                    var cand2 = targetLayer.pageItems[pi2];
+                    var cn2 = cand2.name || "";
+                    if (cn2.indexOf("_Box_") !== -1) continue;
+                    placed = cand2;
+                    break;
+                }} catch(e) {{}}
+            }}
+            if (!placed) return -4;
+            try {{ placed.name = GROUP_NAME; }} catch(e2) {{ return -4; }}
+        }}
         try {{
             if (placed.parent !== targetLayer) placed.moveToEnd(targetLayer);
         }} catch(e) {{}}
         ensureSinglePrintOnLayer(targetLayer, GROUP_NAME);
+
+        function slotRectFromSlot1(slot1Rect, w, h, gapX, gapY, columns, index1Based) {{
+            var idx = index1Based - 1;
+            var col = idx % columns;
+            var row = Math.floor(idx / columns);
+            var left = slot1Rect[0] + col * (w + gapX);
+            var top = slot1Rect[1] - row * (h + gapY);
+            return [left, top, left + w, top - h];
+        }}
 
         var targetAb = null;
         var abIdx = -1;
@@ -1820,13 +2931,36 @@ def place_variable_template_variant(
                 break;
             }}
         }}
+        if (!targetAb) {{
+            var abFallback = ARTBOARD_NAME.replace(/_\\d+$/, "") + "_1";
+            try {{ targetAb = prodDoc.artboards.getByName(abFallback); }} catch(e) {{}}
+        }}
         if (!targetAb) return -5;
 
-        prodDoc.artboards.setActiveArtboardIndex(abIdx);
-        var targetRect = resizeArtboardTopLeft(targetAb, tplW, tplH);
-        placeAtArtboardOffset(placed, targetRect, layoutOff.relL, layoutOff.relT);
+        if (LAYERS_ONLY) {{
+            var boxSuffix = getSimBoxSuffix(CATEGORY, tplW, tplH);
+            var boxName = PREFIX + "_Box_" + boxSuffix;
+            var box = findNamedItem(targetLayer, boxName);
+            if (!box) {{
+                try {{ box = targetLayer.pageItems.getByName(boxName); }} catch(e) {{ box = null; }}
+            }}
+            if (!box) return -6;
+            var bb = box.visibleBounds;
+            var boxRect = [bb[0], bb[1], bb[2], bb[3]];
+            placeAtArtboardOffset(placed, boxRect, layoutOff.relL, layoutOff.relT);
+        }} else {{
+            var placeRect;
+            if (abIdx >= 0) prodDoc.artboards.setActiveArtboardIndex(abIdx);
+            placeRect = targetAb.artboardRect;
+            if (CENTER_ON_ARTBOARD) {{
+                fitAndCenterOnArtboard(placed, placeRect, 24);
+            }} else {{
+                placeRect = resizeArtboardTopLeft(targetAb, tplW, tplH);
+                placeAtArtboardOffset(placed, placeRect, layoutOff.relL, layoutOff.relT);
+            }}
+        }}
 
-        if (DO_PRINT_COLOR === "true") {{
+        if (DO_PRINT_COLOR) {{
             var pc2 = makePrintColor(PRINT_R, PRINT_G, PRINT_B);
             colRecPrint(placed, pc2);
         }}
@@ -1844,7 +2978,7 @@ def place_variable_template_variant(
                 var simCopy = placed.duplicate(simTarget, ElementPlacement.PLACEATEND);
                 simCopy.hidden = false;
                 placeSimExactFromTemplate(simCopy, layoutOff, tplW, tplH, PREFIX, CATEGORY);
-                if (DO_SIM_COLOR === "true") {{
+                if (DO_SIM_COLOR) {{
                     var c = makePrintColor(SIM_R, SIM_G, SIM_B);
                     colRecPrint(simCopy, c);
                 }}
@@ -1862,11 +2996,19 @@ def place_variable_template_variant(
                 product_doc.Activate()
             except Exception:
                 pass
-        res = app.DoJavaScript(jsx)
-        if res is None or res == "":
-            print("   > Template placement: empty JSX result")
+        activate_document(app, product_doc_name)
+        val = None
+        for attempt in range(3):
+            res = app.DoJavaScript(jsx)
+            if res is None or res == "":
+                print("   > Template placement: empty JSX result")
+                return 0.0
+            val = float(res)
+            if val >= 0 or val != -4.0:
+                break
+            time.sleep(0.4)
+        if val is None:
             return 0.0
-        val = float(res)
         if val < 0:
             err_map = {
                 -1: "product document not found",
@@ -1874,6 +3016,8 @@ def place_variable_template_variant(
                 -3: f"print layer not found: {layer_name}",
                 -4: "paste from template failed",
                 -5: f"artboard not found: {artboard_name}",
+                -6: f"placement box not found on {layer_name}",
+                -7: "template session lost — reopen Illustrator if this repeats",
             }
             print(f"   > Template placement failed: {err_map.get(int(val), val)}")
             return 0.0
@@ -1961,7 +3105,9 @@ def refresh_template_side_colors(
                     }} catch(e) {{}}
                 }}
                 var doc = app.activeDocument;
-                var layer = doc.layers.getByName("{safe_layer}");
+                var layer = null;
+                try {{ layer = doc.layers.getByName("{safe_layer}"); }} catch(e) {{ return; }}
+                if (!layer) return;
                 layer.locked = false;
                 var grp = null;
                 try {{ grp = layer.pageItems.getByName("{safe_group}"); }} catch(e) {{ return; }}
@@ -2145,11 +3291,13 @@ def place_and_simulate_print(
     return final_true_width
 
 
-def variable_layer_and_artboard(side: str, variant_index: int) -> tuple[str, str]:
+def variable_layer_and_artboard(
+    side: str, variant_index: int, layers_only: bool = False
+) -> tuple[str, str]:
     cfg = VARIABLE_SIDE_BASE[side]
     layer = f"{cfg['layer']}_{variant_index}"
-    if side in ("right_sleeve", "left_sleeve"):
-        artboard = f"{cfg['layer']}_{variant_index}"
+    if layers_only:
+        artboard = f"{cfg['layer']}_1"
     else:
         artboard = f"{cfg['layer']}_{variant_index}"
     return layer, artboard

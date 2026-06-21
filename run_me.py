@@ -6,16 +6,16 @@ import sys
 FILES_TO_UPDATE = {
     "run_me.py": "https://raw.githubusercontent.com/Paintzart/Auto_Print_System/refs/heads/main/run_me.py", # הוא מעדכן את עצמו!
     "main.py": "https://raw.githubusercontent.com/Paintzart/Auto_Print_System/refs/heads/main/main.py",
-    "illustrator_ops.py": "https://raw.githubusercontent.com/Paintzart/Auto_Print_System/refs/heads/main/illustrator_ops.py",
     "vectorizer_ops.py": "https://raw.githubusercontent.com/Paintzart/Auto_Print_System/refs/heads/main/vectorizer_ops.py",
     "server.js": "https://raw.githubusercontent.com/Paintzart/Auto_Print_System/refs/heads/main/server.js",
     "prepare_print.py": "https://raw.githubusercontent.com/Paintzart/Auto_Print_System/refs/heads/main/prepare_print.py",
     "package.json": "https://raw.githubusercontent.com/Paintzart/Auto_Print_System/refs/heads/main/package.json",
     "package-lock.json": "https://raw.githubusercontent.com/Paintzart/Auto_Print_System/refs/heads/main/package-lock.json", # חדש!
     "requirements.txt": "https://raw.githubusercontent.com/Paintzart/Auto_Print_System/refs/heads/main/requirements.txt", # חדש!
-    "sidebar_logic.jsx": "https://raw.githubusercontent.com/Paintzart/Auto_Print_System/refs/heads/main/sidebar_logic.jsx", # חדש!
-    "variable_print.py": "https://raw.githubusercontent.com/Paintzart/Auto_Print_System/refs/heads/main/variable_print.py", # כפתור כתום
-    "run_merge_batch.jsx": "https://raw.githubusercontent.com/Paintzart/Auto_Print_System/refs/heads/main/run_merge_batch.jsx", # כפתור כתום
+    "sidebar_logic.jsx": "https://raw.githubusercontent.com/Paintzart/Auto_Print_System/refs/heads/main/sidebar_logic.jsx",
+    "variable_print.py": "https://raw.githubusercontent.com/Paintzart/Auto_Print_System/refs/heads/main/variable_print.py",
+    "illustrator_ops.py": "https://raw.githubusercontent.com/Paintzart/Auto_Print_System/refs/heads/main/illustrator_ops.py",
+    "run_merge_batch.jsx": "https://raw.githubusercontent.com/Paintzart/Auto_Print_System/refs/heads/main/run_merge_batch.jsx",
 }
 def update_files():
     print("--- בודק עדכונים מהענן (GitHub) ---")

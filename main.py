@@ -547,6 +547,112 @@ def process_single_product_to_temp(order, idx, folder, is_wholesale=False, order
     finally:
         pythoncom.CoUninitialize()
 # -----------------------------------------------------------
+# פרסומת / Sidebar — על מסמך פתוח (לפני שמירה)
+# -----------------------------------------------------------
+def write_merge_job_config(order_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    ordered_products = []
+    if order_data and "products" in order_data:
+        ordered_products = list(
+            {str(p.get("product_type")) for p in order_data["products"]}
+        )
+    sim_ad = (order_data or {}).get("simulation_ad", {}) or {}
+    job_path = os.path.join(BASE_DIR, "current_job.json")
+    sidebar_already_applied = False
+    if os.path.exists(job_path):
+        try:
+            with open(job_path, "r", encoding="utf-8") as f:
+                sidebar_already_applied = bool(
+                    json.load(f).get("sidebar_already_applied", False)
+                )
+        except Exception:
+            pass
+    job_config = {
+        "sidebar_path": config.get("sidebar_template_path", "").replace("\\", "/"),
+        "ordered_products": ordered_products,
+        "show_sidebar": bool(sim_ad.get("enabled", False)),
+        "upsell_mode": sim_ad.get("mode", "random"),
+        "manual_products": sim_ad.get("selected_products", []),
+        "sidebar_already_applied": sidebar_already_applied,
+    }
+    with open(job_path, "w", encoding="utf-8") as f:
+        json.dump(job_config, f, ensure_ascii=False, indent=4)
+    return job_config
+
+
+def reset_sidebar_job_flag() -> None:
+    """איפוס דגל פרסומת — בתחילת כל הזמנה."""
+    job_path = os.path.join(BASE_DIR, "current_job.json")
+    job: Dict[str, Any] = {}
+    if os.path.exists(job_path):
+        try:
+            with open(job_path, "r", encoding="utf-8") as f:
+                job = json.load(f)
+        except Exception:
+            pass
+    job["sidebar_already_applied"] = False
+    with open(job_path, "w", encoding="utf-8") as f:
+        json.dump(job, f, ensure_ascii=False, indent=4)
+
+
+def mark_sidebar_already_applied() -> None:
+    job_path = os.path.join(BASE_DIR, "current_job.json")
+    job: Dict[str, Any] = {}
+    if os.path.exists(job_path):
+        try:
+            with open(job_path, "r", encoding="utf-8") as f:
+                job = json.load(f)
+        except Exception:
+            pass
+    job["sidebar_already_applied"] = True
+    with open(job_path, "w", encoding="utf-8") as f:
+        json.dump(job, f, ensure_ascii=False, indent=4)
+
+
+def apply_sidebar_to_open_document(app, doc_name: str, order_data: Optional[Dict[str, Any]] = None) -> bool:
+    """מריץ sidebar_logic.jsx על מסמך AI פתוח — לפני שמירה (מונע כשל PDF)."""
+    job = write_merge_job_config(order_data)
+    if not job.get("show_sidebar"):
+        return False
+    sidebar_logic_path = os.path.join(BASE_DIR, "sidebar_logic.jsx").replace("\\", "/")
+    if not os.path.exists(sidebar_logic_path):
+        print("   ⚠ Sidebar template script missing — skip ad")
+        return False
+    safe_doc = doc_name.replace("\\", "\\\\").replace('"', '\\"')
+    jsx = f"""
+    #target illustrator
+    (function() {{
+        var want = "{safe_doc}";
+        for (var i = 0; i < app.documents.length; i++) {{
+            if (app.documents[i].name === want) {{
+                app.activeDocument = app.documents[i];
+                break;
+            }}
+        }}
+        var doc = app.activeDocument;
+        try {{ doc.layers.getByName("1"); }} catch(e) {{
+            var l1 = doc.layers.add();
+            l1.name = "1";
+            for (var i = doc.layers.length - 1; i >= 0; i--) {{
+                var lay = doc.layers[i];
+                if (lay !== l1) lay.move(l1, ElementPlacement.PLACEATEND);
+            }}
+        }}
+        $.global.targetMasterDoc = doc;
+        var sideFile = new File("{sidebar_logic_path}");
+        if (sideFile.exists) $.evalFile(sideFile);
+    }})();
+    """
+    try:
+        print("   > Applying simulation sidebar (upsell ad)...")
+        app.DoJavaScript(jsx)
+        mark_sidebar_already_applied()
+        return True
+    except Exception as e:
+        print(f"   ⚠ Sidebar apply failed: {e}")
+        return False
+
+
+# -----------------------------------------------------------
 # פונקציית האיחוד: ה-Super Script (חישוב גובה ורוחב דינמי חכם)
 # -----------------------------------------------------------
 def create_and_run_merge_script(files_list, output_pdf, order_data=None):
@@ -571,6 +677,8 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
     print("="*40 + "\n")
     # ------------------------------------------
     # קריאת נתוני simulation_ad מה-order_data
+    job_config = write_merge_job_config(order_data)
+    sidebar_already_applied = bool(job_config.get("sidebar_already_applied", False))
     sim_ad = order_data.get('simulation_ad', {}) or {} if order_data else {}
     print(f"\n🔍 DEBUG: sim_ad = {sim_ad}")
     show_sidebar = bool(sim_ad.get('enabled', False))
@@ -579,17 +687,12 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
     print(f"🔍 DEBUG: show_sidebar = {show_sidebar}")
     print(f"🔍 DEBUG: upsell_mode = {upsell_mode}")
     print(f"🔍 DEBUG: manual_list = {manual_list}")
-    # הכנת אובייקט הגדרות ל-JSX
-    job_config = {
-        "sidebar_path": config.get('sidebar_template_path', "").replace("\\", "/"),
-        "ordered_products": ordered_products,
-        "show_sidebar": show_sidebar,
-        "upsell_mode": upsell_mode,
-        "manual_products": manual_list,
-    }
-    # כתיבת הקונפיג לקובץ JSON זמני
+    job_config["show_sidebar"] = show_sidebar
+    job_config["upsell_mode"] = upsell_mode
+    job_config["manual_products"] = manual_list
+    job_config["ordered_products"] = ordered_products
     with open(os.path.join(BASE_DIR, "current_job.json"), "w", encoding="utf-8") as f:
-        json.dump(job_config, f, ensure_ascii=False, indent=4)    # ------------------------------------------
+        json.dump(job_config, f, ensure_ascii=False, indent=4)
     js_files = [f.replace("\\", "/") for f in files_list]
     merge_open_dir = os.path.join(BASE_DIR, "temp_ai_files", "_merge_open")
     os.makedirs(merge_open_dir, exist_ok=True)
@@ -672,11 +775,24 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
         }}
         var sideFile = new File("{sidebar_logic_path}");
         var showSidebar = {str(show_sidebar).lower()};
+        var sidebarAlreadyApplied = {str(sidebar_already_applied).lower()};
+        function docHasSidebarLayer(doc) {{
+            function scan(container) {{
+                if (!container || !container.layers) return false;
+                for (var i = 0; i < container.layers.length; i++) {{
+                    if (container.layers[i].name === "Sidebar_Layer") return true;
+                    if (scan(container.layers[i])) return true;
+                }}
+                return false;
+            }}
+            return scan(doc);
+        }}
         $.writeln("=== MERGE SCRIPT: Sidebar check ===");
         $.writeln("showSidebar: " + showSidebar);
+        $.writeln("sidebarAlreadyApplied: " + sidebarAlreadyApplied);
         $.writeln("sideFile exists: " + sideFile.exists);
         $.writeln("masterDoc name: " + masterDoc.name);
-        if (showSidebar && sideFile.exists) {{
+        if (showSidebar && !sidebarAlreadyApplied && !docHasSidebarLayer(masterDoc) && sideFile.exists) {{
             $.writeln("--- Calling sidebar_logic.jsx ---");
             // העברת masterDoc כמשתנה גלובלי ל-sidebar_logic.jsx
             var targetDoc = masterDoc;
@@ -699,7 +815,7 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
             $.writeln("Document artboards count: " + targetDoc.artboards.length);
             $.writeln("--- Sidebar logic complete ---");
         }} else {{
-            $.writeln("Sidebar skipped (showSidebar=" + showSidebar + ", fileExists=" + sideFile.exists + ")");
+            $.writeln("Sidebar skipped (showSidebar=" + showSidebar + ", alreadyApplied=" + sidebarAlreadyApplied + ", hasLayer=" + docHasSidebarLayer(masterDoc) + ", fileExists=" + sideFile.exists + ")");
         }}
         reorderArtboardsSafe(masterDoc);
     }}
@@ -882,6 +998,7 @@ if __name__ == "__main__":
                     pass
             # השינוי הקריטי: הוספת exist_ok=True
             os.makedirs(TEMP_AI_DIR, exist_ok=True)
+            reset_sidebar_job_flag()
             generated_files = []
             # שלב 3: עיבוד המוצרים
             is_wholesale = full_data.get('is_wholesale', False)
@@ -899,7 +1016,7 @@ if __name__ == "__main__":
                     prod = products[0]
                     download_variable_product_files(prod, current_order_4)
                     ai_file = process_variable_product_to_temp(
-                        prod, order_folder, is_wholesale, order_id=raw_order_id
+                        prod, order_folder, is_wholesale, order_id=raw_order_id, order_data=full_data
                     )
                     if ai_file:
                         generated_files.append(ai_file)

@@ -57,12 +57,25 @@
             processNextFileFast(masterDoc, files[j], (j+1).toString(), col * STEP_X, -(row * STEP_Y));
         }
         var sideFile = new File("C:/Users/yarde/OneDrive/Desktop/Auto_Print_System/sidebar_logic.jsx");
-        var showSidebar = false;
+        var showSidebar = true;
+        var sidebarAlreadyApplied = true;
+        function docHasSidebarLayer(doc) {
+            function scan(container) {
+                if (!container || !container.layers) return false;
+                for (var i = 0; i < container.layers.length; i++) {
+                    if (container.layers[i].name === "Sidebar_Layer") return true;
+                    if (scan(container.layers[i])) return true;
+                }
+                return false;
+            }
+            return scan(doc);
+        }
         $.writeln("=== MERGE SCRIPT: Sidebar check ===");
         $.writeln("showSidebar: " + showSidebar);
+        $.writeln("sidebarAlreadyApplied: " + sidebarAlreadyApplied);
         $.writeln("sideFile exists: " + sideFile.exists);
         $.writeln("masterDoc name: " + masterDoc.name);
-        if (showSidebar && sideFile.exists) {
+        if (showSidebar && !sidebarAlreadyApplied && !docHasSidebarLayer(masterDoc) && sideFile.exists) {
             $.writeln("--- Calling sidebar_logic.jsx ---");
             // העברת masterDoc כמשתנה גלובלי ל-sidebar_logic.jsx
             var targetDoc = masterDoc;
@@ -85,7 +98,7 @@
             $.writeln("Document artboards count: " + targetDoc.artboards.length);
             $.writeln("--- Sidebar logic complete ---");
         } else {
-            $.writeln("Sidebar skipped (showSidebar=" + showSidebar + ", fileExists=" + sideFile.exists + ")");
+            $.writeln("Sidebar skipped (showSidebar=" + showSidebar + ", alreadyApplied=" + sidebarAlreadyApplied + ", hasLayer=" + docHasSidebarLayer(masterDoc) + ", fileExists=" + sideFile.exists + ")");
         }
         reorderArtboardsSafe(masterDoc);
     }

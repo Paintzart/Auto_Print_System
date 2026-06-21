@@ -152,6 +152,10 @@ function main() {
         $.writeln("Sidebar disabled by config.");
         return;
     }
+    if (job && job.sidebar_already_applied) {
+        $.writeln("Sidebar already applied in variable step — skip.");
+        return;
+    }
     // שימוש במסמך שהועבר מהסקריפט הראשי (masterDoc) או במסמך הפעיל
     var pdfDoc = null;
     if (typeof $.global.targetMasterDoc !== 'undefined' && $.global.targetMasterDoc !== null) {
@@ -166,6 +170,21 @@ function main() {
     }
     $.writeln("Target document name: " + pdfDoc.name);
     $.writeln("Active document name: " + app.activeDocument.name);
+    function docHasSidebarLayer(doc) {
+        function scan(container) {
+            if (!container || !container.layers) return false;
+            for (var i = 0; i < container.layers.length; i++) {
+                if (container.layers[i].name === "Sidebar_Layer") return true;
+                if (scan(container.layers[i])) return true;
+            }
+            return false;
+        }
+        return scan(doc);
+    }
+    if (docHasSidebarLayer(pdfDoc)) {
+        $.writeln("Sidebar_Layer already in document — skip duplicate ad.");
+        return;
+    }
     $.writeln("Number of artboards: " + pdfDoc.artboards.length);
     var abRect = pdfDoc.artboards[0].artboardRect;
     $.writeln("First artboard rect: " + abRect.toString());
