@@ -58,7 +58,7 @@
         }
         var sideFile = new File("C:/Users/yarde/OneDrive/Desktop/Auto_Print_System/sidebar_logic.jsx");
         var showSidebar = true;
-        var sidebarAlreadyApplied = true;
+        var sidebarAlreadyApplied = false;
         function docHasSidebarLayer(doc) {
             function scan(container) {
                 if (!container || !container.layers) return false;
