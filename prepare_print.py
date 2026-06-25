@@ -3,13 +3,10 @@ import os
 import re
 import math
 import win32com.client
-import pywintypes
 import time
 import json
 import pythoncom
 import shutil
-
-PS_COM_BUSY = -2147417846  # RPC_E_SERVERCALL_RETRYLATER
 # הגדרת קידוד לקונסול כדי לתמוך בעברית ונתיבים
 sys.stdout.reconfigure(encoding='utf-8')
 # ========================================================
@@ -1248,38 +1245,6 @@ def run_illustrator_split(source_file_path, order_number, output_folder, order_p
             try: os.remove(temp_ai)
             except: pass
     return files_created
-
-def _is_com_busy_error(exc):
-    if not isinstance(exc, pywintypes.com_error):
-        return False
-    if exc.args and exc.args[0] == PS_COM_BUSY:
-        return True
-    return len(exc.args) > 1 and "busy" in str(exc.args[1]).lower()
-
-def _do_photoshop_js_with_retry(ps, jsx_command, max_attempts=10, delay_seconds=2):
-    for attempt in range(1, max_attempts + 1):
-        try:
-            return ps.DoJavaScript(jsx_command)
-        except pywintypes.com_error as e:
-            if _is_com_busy_error(e) and attempt < max_attempts:
-                print(f"   ניסיון {attempt}/{max_attempts}: Photoshop עסוק, ממתין {delay_seconds} שניות...")
-                time.sleep(delay_seconds)
-            else:
-                raise
-
-def _wait_for_photoshop_ready(ps, max_attempts=15, delay_seconds=2):
-    for attempt in range(1, max_attempts + 1):
-        try:
-            ps.DoJavaScript("app.name")
-            return True
-        except pywintypes.com_error as e:
-            if _is_com_busy_error(e) and attempt < max_attempts:
-                print(f"   ממתין ל-Photoshop ({attempt}/{max_attempts})...")
-                time.sleep(delay_seconds)
-            else:
-                raise
-    return False
-
 def run_photoshop_processing(files_list, default_contract_px, thickness_map=None):
     pythoncom.CoInitialize()
     ps = None
@@ -1303,21 +1268,6 @@ def run_photoshop_processing(files_list, default_contract_px, thickness_map=None
                 print("")
                 return
     if ps is None:
-        return
-    try:
-        ps.DisplayDialogs = 3
-    except Exception:
-        pass
-    try:
-        _wait_for_photoshop_ready(ps)
-    except Exception as e:
-        print(f"Error: Photoshop לא מוכן לעיבוד: {e}")
-        print("")
-        print("  טיפים:")
-        print("  • סגור חלונות/דיאלוגים פתוחים ב-Photoshop.")
-        print("  • פתח את Photoshop ידנית לפני לחיצה על הכפתור (ורד/ורוד).")
-        print("  • המתן עד שהחלון של Photoshop נטען לגמרי ואז הרץ שוב.")
-        print("")
         return
     thickness_map = thickness_map or {}
     for entry in files_list:
@@ -1345,19 +1295,7 @@ def run_photoshop_processing(files_list, default_contract_px, thickness_map=None
             f.write(jsx_code)
         px_label = f" ({contract_px}px)" if thickness_map else ""
         print(f"Sending to Photoshop: {os.path.basename(file_path)}{px_label}")
-        try:
-            _do_photoshop_js_with_retry(
-                ps,
-                f'$.evalFile("{jsx_file.replace(os.sep, "/")}")',
-            )
-        except Exception as e:
-            print(f"❌ Photoshop error: {os.path.basename(file_path)} — {e}")
-            if os.path.exists(jsx_file):
-                try:
-                    os.remove(jsx_file)
-                except OSError:
-                    pass
-            continue
+        ps.DoJavaScript(f'$.evalFile("{jsx_file.replace(os.sep, "/")}")')
         # המתנה לסיום (הגדלתי את זמן ההמתנה ל-30 שניות)
         success = False
         for _ in range(300):
@@ -1470,7 +1408,6 @@ if __name__ == "__main__":
     # ---------------------------------------
     if generated:
         print("Step 2: Photoshop Processing...")
-        time.sleep(2)
         run_photoshop_processing(
             generated,
             contract_px,

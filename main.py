@@ -83,6 +83,7 @@ TEMPLATES = {
     'Zippered Hoodie': os.path.join(BASE_DIR, 'Simulations', 'Zippered Hoodie.ai'),
     'Wide Brimmed Hat': os.path.join(BASE_DIR, 'Simulations', 'Wide Brimmed Hat.ai'),
     'Undershirt': os.path.join(BASE_DIR, 'Simulations', 'Undershirt.ai'),
+    'Vneck shirt': os.path.join(BASE_DIR, 'Simulations', 'Vneck shirt.ai'),
     'Mesh hat': os.path.join(BASE_DIR, 'Simulations', 'Mesh hat.ai'),
     'Combined hat': os.path.join(BASE_DIR, 'Simulations', 'Combined hat.ai'),
     'Shirt': os.path.join(BASE_DIR, 'Simulations', 'Short.ai'),
