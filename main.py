@@ -71,6 +71,7 @@ TEMPLATES = {
     'Mesh Laundry Basket': os.path.join(BASE_DIR, 'Simulations', 'Mesh Laundry Basket.ai'),
     'Laundry Basket': os.path.join(BASE_DIR, 'Simulations', 'Laundry Basket.ai'),
     'Scarf': os.path.join(BASE_DIR, 'Simulations', 'Scarf.ai'),
+    'Schlocker': os.path.join(BASE_DIR, 'Simulations', 'Schlocker.ai'),
     'Raglan Shirt': os.path.join(BASE_DIR, 'Simulations', 'Raglan Shirt.ai'),
     'Polo': os.path.join(BASE_DIR, 'Simulations', 'Polo.ai'),
     'Sweater': os.path.join(BASE_DIR, 'Simulations', 'Sweater.ai'),
