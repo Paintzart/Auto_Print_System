@@ -9,10 +9,35 @@ import pythoncom
 import shutil
 # הגדרת קידוד לקונסול כדי לתמוך בעברית ונתיבים
 sys.stdout.reconfigure(encoding='utf-8')
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# ========================================================
+# הוספת Sidebar_NumOrder (מספר הזמנה) לדף הראשון — כמו פרסומת
+JSX_APPLY_NUMORDER_HELPER = r'''
+function applyNumOrderSidebar(doc, mode) {
+    try {
+        if (!doc) return;
+        $.global.targetMasterDoc = doc;
+        $.global.numOrderLast4 = ORDER_LAST4;
+        $.global.numOrderSidebarPath = SIDEBAR_NUMORDER_PATH;
+        $.global.numOrderMode = mode || "side";
+        $.global.showNumOrderSidebar = true;
+        var f = new File(SIDEBAR_NUMORDER_SCRIPT);
+        if (f.exists) {
+            $.writeln("Applying NumOrder sidebar (" + $.global.numOrderMode + ")...");
+            $.evalFile(f);
+        } else {
+            $.writeln("NumOrder script missing: " + SIDEBAR_NUMORDER_SCRIPT);
+        }
+    } catch (e) {
+        $.writeln("NumOrder sidebar skipped: " + e);
+    }
+}
+'''
 # ========================================================
 # יצירת קובץ סיכום הדמיות (הגרסה הסופית: Manual Grouping לשמירה על שכבות)
 JSX_CREATE_SIM_SUMMARY = r'''
 #target illustrator
+''' + JSX_APPLY_NUMORDER_HELPER + r'''
 function createSimSummary() {
     var sourceDoc = app.activeDocument;
     var savePath = SAVE_PATH;
@@ -51,6 +76,7 @@ function createSimSummary() {
                 break;
             }
         }
+        applyNumOrderSidebar(sourceDoc, "side");
         var opts = new PDFSaveOptions();
         opts.presetFile = "[Press Quality]";
         opts.artboardRange = (targetAbIdx + 1).toString();
@@ -102,6 +128,8 @@ function createSimSummary() {
             }
         }
     }
+    // 2+ הדמיות בעמוד → Artboard 2 / sidebar2 / גובה 24 / תחתית
+    applyNumOrderSidebar(targetDoc, "bottom");
     var saveOpts = new PDFSaveOptions();
     saveOpts.presetFile = "[Press Quality]";
     targetDoc.saveAs(new File(savePath), saveOpts);
@@ -418,6 +446,7 @@ checkDoubleCondition();
 # צביעת הגרפיקה בלבן נקי (CMYK 0,0,0,0)
 JSX_CREATE_PRINT_FROM_SCRATCH = r"""
 #target illustrator
+""" + JSX_APPLY_NUMORDER_HELPER + r"""
 // יצירת קובץ Print מאפס עבור מוצר 1 בלבד
 function createPrintFromScratch() {
     var sourceDoc = app.activeDocument;
@@ -476,6 +505,7 @@ function createPrintFromScratch() {
             abCenterX - (newGroup.width / 2),
             abCenterY + (newGroup.height / 2)
         ];
+        applyNumOrderSidebar(newDoc, "side");
         // שמירה
         var pdfOpts = new PDFSaveOptions();
         pdfOpts.presetFile = "[Press Quality]";
@@ -788,8 +818,44 @@ checkAndRecolorAllLayers();
 # הסרת שכבה/קבוצה "information" מתוך Simulation בכל מוצר (גם אם נעולה) – להכנת קובץ הדפסה
 JSX_REMOVE_INFORMATION_FROM_SIMULATION = r"""
 #target illustrator
+function removeNamedRecursive(container, name) {
+    if (!container) return;
+    try {
+        if (container.textFrames) {
+            for (var t = container.textFrames.length - 1; t >= 0; t--) {
+                try {
+                    if (container.textFrames[t].name === name) container.textFrames[t].remove();
+                } catch (eT) {}
+            }
+        }
+    } catch (e1) {}
+    try {
+        if (container.pageItems) {
+            for (var i = container.pageItems.length - 1; i >= 0; i--) {
+                var it = container.pageItems[i];
+                try {
+                    if (it.name === name && it.typename === "TextFrame") {
+                        it.remove();
+                        continue;
+                    }
+                } catch (e2) {}
+                if (it.typename === "GroupItem") removeNamedRecursive(it, name);
+            }
+        }
+    } catch (e3) {}
+    try {
+        if (container.layers) {
+            for (var j = 0; j < container.layers.length; j++) {
+                removeNamedRecursive(container.layers[j], name);
+            }
+        }
+    } catch (e4) {}
+}
 function removeInformationFromSimulation() {
     var doc = app.activeDocument;
+    // מחיקת NumberOrder מכל המסמך (בהדפסה כבר כותבים בגדול ב-Sidebar)
+    try { doc.textFrames.getByName("NumberOrder").remove(); } catch (eN) {}
+    removeNamedRecursive(doc, "NumberOrder");
     for (var i = 0; i < doc.layers.length; i++) {
         var mainLayer = doc.layers[i];
         if (!/^\d+$/.test(mainLayer.name)) continue;
@@ -797,6 +863,7 @@ function removeInformationFromSimulation() {
             var simLayer = mainLayer.layers.getByName("Simulation");
             simLayer.locked = false;
             simLayer.visible = true;
+            removeNamedRecursive(simLayer, "NumberOrder");
             // נסיון למחוק שכבת "information"
             try {
                 var infoLayer = simLayer.layers.getByName("information");
@@ -1314,7 +1381,7 @@ def run_photoshop_processing(files_list, default_contract_px, thickness_map=None
         if os.path.exists(jsx_file): os.remove(jsx_file)
 # ========================================================
 def create_simulation_summary_file(source_file_path, order_number, output_folder):
-    """יוצר קובץ PDF מסכם של ההדמיות"""
+    """יוצר קובץ PDF מסכם של ההדמיות + Sidebar_NumOrder עם 4 ספרות אחרונות"""
     pythoncom.CoInitialize()
     try:
         app = win32com.client.Dispatch("Illustrator.Application")
@@ -1329,6 +1396,39 @@ def create_simulation_summary_file(source_file_path, order_number, output_folder
         except: pass
     js_save_path = os.path.abspath(final_pdf_path).replace("\\", "/")
     print(f">> Generating Simulation Summary: {final_pdf_name}")
+
+    # Sidebar_NumOrder — מתיקיית Simulations ליד הקוד (כמו שאר ההדמיות)
+    sidebar_numorder_path = os.path.join(BASE_DIR, "Simulations", "Sidebar_NumOrder.ai").replace("\\", "/")
+    sidebar_numorder_script = os.path.join(BASE_DIR, "sidebar_numorder_logic.jsx").replace("\\", "/")
+    # שמירה גם ל-current_job.json לגיבוי לסקריפט
+    try:
+        job_path = os.path.join(BASE_DIR, "current_job.json")
+        job = {}
+        if os.path.exists(job_path):
+            try:
+                with open(job_path, "r", encoding="utf-8") as jf:
+                    job = json.load(jf)
+            except Exception:
+                job = {}
+        job.update({
+            "order_last4": last_4,
+            "sidebar_numorder_path": sidebar_numorder_path,
+            "show_numorder_sidebar": True,
+        })
+        with open(job_path, "w", encoding="utf-8") as jf:
+            json.dump(job, jf, ensure_ascii=False, indent=4)
+    except Exception as e:
+        print(f"   ⚠ Could not update current_job.json for NumOrder: {e}")
+
+    def inject_numorder(script: str) -> str:
+        return (
+            script
+            .replace("SAVE_PATH", json.dumps(js_save_path))
+            .replace("ORDER_LAST4", json.dumps(last_4))
+            .replace("SIDEBAR_NUMORDER_SCRIPT", json.dumps(sidebar_numorder_script))
+            .replace("SIDEBAR_NUMORDER_PATH", json.dumps(sidebar_numorder_path))
+        )
+
     # בדיקה אם יש רק מוצר 1
     is_only_product_1 = False
     try:
@@ -1346,27 +1446,30 @@ def create_simulation_summary_file(source_file_path, order_number, output_folder
         pass
     try:
         app.Open(source_file_path)
-        # הסרת שכבה/קבוצה "information" מתוך Simulation בכל מוצר (גם אם נעולה)
+        # הסרת information + NumberOrder מתוך Simulation (בהדפסה המספר בגדול ב-Sidebar)
         try:
             app.DoJavaScript(JSX_REMOVE_INFORMATION_FROM_SIMULATION)
+            print("   > Removed information + NumberOrder from print simulation")
         except Exception:
             pass
         if is_only_product_1:
             # יצירת הקובץ מאפס עבור מוצר 1 בלבד
             print(f"   > Creating Print file from scratch for Product 1 only...")
-            script_to_run = JSX_CREATE_PRINT_FROM_SCRATCH.replace("SAVE_PATH", json.dumps(js_save_path))
+            print(f"   > Adding NumOrder sidebar ({last_4})...")
+            script_to_run = inject_numorder(JSX_CREATE_PRINT_FROM_SCRATCH)
             result = app.DoJavaScript(script_to_run)
             if "SUCCESS" in str(result):
                 print(f"   > Created Summary: {final_pdf_name}")
             else:
                 print(f"   > Error creating from scratch: {result}")
                 # נסיון עם הלוגיקה הרגילה
-                script_to_run = JSX_CREATE_SIM_SUMMARY.replace("SAVE_PATH", json.dumps(js_save_path))
+                script_to_run = inject_numorder(JSX_CREATE_SIM_SUMMARY)
                 app.DoJavaScript(script_to_run)
                 print(f"   > Created Summary (fallback): {final_pdf_name}")
         else:
             # לוגיקה רגילה - עבור מספר מוצרים
-            script_to_run = JSX_CREATE_SIM_SUMMARY.replace("SAVE_PATH", json.dumps(js_save_path))
+            print(f"   > Adding NumOrder sidebar ({last_4})...")
+            script_to_run = inject_numorder(JSX_CREATE_SIM_SUMMARY)
             app.DoJavaScript(script_to_run)
             print(f"   > Created Summary: {final_pdf_name}")
     except Exception as e:

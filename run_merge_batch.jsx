@@ -1,6 +1,6 @@
 
     #target illustrator
-    var files = ["C:/Users/yarde/OneDrive/Desktop/Auto_Print_System/temp_ai_files/_merge_open/temp_0_merge.pdf"];
+    var files = ["C:/Users/yarde/OneDrive/Desktop/Auto_Print_System/temp_ai_files/_merge_open/temp_0_merge.pdf", "C:/Users/yarde/OneDrive/Desktop/Auto_Print_System/temp_ai_files/_merge_open/temp_1_merge.pdf"];
     function fileLooksLikePdf(f) {
         try {
             if (!f.open("r")) return false;

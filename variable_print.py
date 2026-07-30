@@ -26,6 +26,7 @@ from illustrator_ops import (
     refresh_template_side_colors,
     run_jsx,
     set_order_number_in_simulation,
+    set_fabric_type_in_simulation,
     remove_variable_placement_boxes,
     cleanup_orphan_variable_print_artboards,
     cleanup_stray_print_on_simulation,
@@ -782,6 +783,10 @@ def process_variable_product_to_temp(
 
         if order_id:
             set_order_number_in_simulation(app, order_id)
+        fabric_type = order.get("fabric_type") or order.get("fabricType")
+        if prod == "Shirt" and fabric_type:
+            print(f"   > fabric_type → type: {fabric_type}")
+            set_fabric_type_in_simulation(app, fabric_type)
         if is_wholesale:
             delete_information_layer(app)
 

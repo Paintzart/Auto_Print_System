@@ -16,7 +16,7 @@ from typing import Dict, Any, Optional
 # הגדרת קידוד
 sys.stdout.reconfigure(encoding='utf-8')
 # ייבוא הפונקציות הגרפיות
-from illustrator_ops import run_jsx, open_and_color_template, place_and_simulate_print, update_size_label, delete_side_assets, delete_print_layer_only, save_pdf, clean_layout, apply_extra_colors, delete_information_layer, set_order_number_in_simulation, remove_order_number_from_simulation, close_all_illustrator_documents, save_native_ai, is_pdf_disguised_as_ai, VARIABLE_PRINT_COLS, VARIABLE_PRINT_GAP_MIN
+from illustrator_ops import run_jsx, open_and_color_template, place_and_simulate_print, update_size_label, delete_side_assets, delete_print_layer_only, save_pdf, clean_layout, apply_extra_colors, delete_information_layer, set_order_number_in_simulation, remove_order_number_from_simulation, set_fabric_type_in_simulation, close_all_illustrator_documents, save_native_ai, is_pdf_disguised_as_ai, VARIABLE_PRINT_COLS, VARIABLE_PRINT_GAP_MIN
 from vectorizer_ops import convert_to_svg
 # --- הגדרות ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -524,6 +524,11 @@ def process_single_product_to_temp(order, idx, folder, is_wholesale=False, order
             set_order_number_in_simulation(app, order_id)
             if idx >= 1:
                 remove_order_number_from_simulation(app)
+        # הדמיית חולצה: fabric_type → תיבת טקסט "type"
+        fabric_type = order.get('fabric_type') or order.get('fabricType')
+        if prod == 'Shirt' and fabric_type:
+            print(f"   > [Product {idx+1}] fabric_type → type: {fabric_type}")
+            set_fabric_type_in_simulation(app, fabric_type)
         # אם זה סיטונאי, מוחקים את שכבה/קבוצה "information" מתוך "Simulation"
         if is_wholesale:
             print(f"   > [Product {idx+1}] מחיקת שכבה 'information'...")

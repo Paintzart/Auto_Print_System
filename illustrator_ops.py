@@ -3381,6 +3381,67 @@ def set_order_number_in_simulation(app, order_id: str):
     run_jsx(app, jsx_code)
 
 
+def set_fabric_type_in_simulation(app, fabric_type: str):
+    """מעדכן תיבת טקסט 'type' בשכבת Simulation עם ערך fabric_type (הדמיית חולצה)."""
+    if not fabric_type:
+        return
+    safe = (
+        str(fabric_type)
+        .replace("\\", "\\\\")
+        .replace("'", "\\'")
+        .replace("\r", "")
+        .replace("\n", " ")
+    )
+    jsx_code = """
+    #target illustrator
+    (function() {
+        var fabricType = '%FABRIC_TYPE%';
+        var doc = app.activeDocument;
+        var simLayer = null;
+        try { simLayer = doc.layers.getByName("Simulation"); } catch(e) { return 0; }
+        if (!simLayer) return 0;
+        simLayer.visible = true;
+        simLayer.locked = false;
+        function findTextFrame(container, name) {
+            try {
+                if (container.textFrames && container.textFrames.getByName) {
+                    return container.textFrames.getByName(name);
+                }
+            } catch(e) {}
+            if (container.pageItems) {
+                for (var i = 0; i < container.pageItems.length; i++) {
+                    var it = container.pageItems[i];
+                    if (it.name === name && it.typename === "TextFrame") return it;
+                    if (it.typename === "GroupItem" && it.pageItems.length > 0) {
+                        var r = findTextFrame(it, name);
+                        if (r) return r;
+                    }
+                }
+            }
+            if (container.layers) {
+                for (var j = 0; j < container.layers.length; j++) {
+                    var r = findTextFrame(container.layers[j], name);
+                    if (r) return r;
+                }
+            }
+            return null;
+        }
+        var tf = findTextFrame(doc, "type") || findTextFrame(simLayer, "type")
+              || findTextFrame(doc, "Type") || findTextFrame(simLayer, "Type");
+        if (!tf) return 0;
+        var p = tf;
+        while (p) {
+            if (p.locked) p.locked = false;
+            try { p = p.parent; } catch(e) { break; }
+            if (p.typename == "Layer") break;
+        }
+        tf.contents = fabricType;
+        return 1;
+    })();
+    """.replace("%FABRIC_TYPE%", safe)
+    run_jsx(app, jsx_code)
+
+
 def remove_order_number_from_simulation(app):
     """מוחק את תיבת הטקסט 'NumberOrder' משכבת Simulation (למוצרים 2 ומעלה – להשאיר מספר הזמנה רק בראשון)."""
     jsx_code = """
