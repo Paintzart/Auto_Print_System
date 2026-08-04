@@ -87,7 +87,10 @@ function createSimSummary() {
     // --- מקרה 2: ריבוי הדמיות ---
     var A4_W = 595.28;
     var A4_H = 841.89;
-    var isLandscape = (simLayersData.length > 2);
+    // 3/4 הדמיות מתנהגות כמו 1 (עמוד יחיד עם Sidebar בצד).
+    // רק 2 הדמיות נשארות במצב הישן (2 בעמוד + Sidebar תחתון).
+    var useTwoSimsMode = (simLayersData.length === 2);
+    var isLandscape = !useTwoSimsMode;
     var docW = isLandscape ? A4_H : A4_W;
     var docH = isLandscape ? A4_W : A4_H;
     var targetDoc = app.documents.add(DocumentColorSpace.CMYK, docW, docH);
@@ -96,7 +99,7 @@ function createSimSummary() {
     var abH = baseRect[1] - baseRect[3];
     var gap = 50;
     var margin = 20;
-    var itemsPerSheet = isLandscape ? 4 : 2;
+    var itemsPerSheet = useTwoSimsMode ? 2 : 1;
     var pages = [];
     var remaining = simLayersData.length;
     while (remaining > 0) {
@@ -128,8 +131,8 @@ function createSimSummary() {
             }
         }
     }
-    // 2+ הדמיות בעמוד → Artboard 2 / sidebar2 / גובה 24 / תחתית
-    applyNumOrderSidebar(targetDoc, "bottom");
+    // 3/4 כמו 1 -> Sidebar בצד. רק 2 -> Sidebar תחתון.
+    applyNumOrderSidebar(targetDoc, useTwoSimsMode ? "bottom" : "side");
     var saveOpts = new PDFSaveOptions();
     saveOpts.presetFile = "[Press Quality]";
     targetDoc.saveAs(new File(savePath), saveOpts);
