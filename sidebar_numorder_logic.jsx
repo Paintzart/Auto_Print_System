@@ -4,11 +4,11 @@
  *
  * מצב "side" (הדמיה אחת / לרוחב):
  *   Artboard 1, שכבת Sidebar, NUM1..NUM4 (ספרה לכל תיבה),
- *   עומד עד 29.3 ס"מ גובה / שוכב עד 29.3 ס"מ רוחב, הצמדה לימין.
+ *   המידה הרגילה נשמרת; הגובה מוגבל ל-20.6 ס"מ במקרים קיצוניים.
  *
  * מצב "bottom" (2+ הדמיות בעמוד):
  *   Artboard 2, שכבת sidebar2, NUM (כל המספר),
- *   עומד עד 29.3 ס"מ גובה / שוכב עד 29.3 ס"מ רוחב, הצמדה לתחתית.
+ *   המידה הרגילה נשמרת; הרוחב מוגבל ל-20.6 ס"מ במקרים קיצוניים.
  *
  * קלט:
  *   $.global.targetMasterDoc, numOrderLast4, numOrderSidebarPath,
@@ -167,16 +167,31 @@ function getLayerByNames(doc, names) {
     return null;
 }
 
-// A4 בצלע הארוכה הוא 29.7 ס"מ. משאירים 4 מ"מ מרווח.
-var SIMULATION_A4_LONG_SIDE_PT = 29.3 * 28.346;
+// המידות המקוריות שנקבעו כדי להשאיר מקום לאזור מספר ההזמנה.
+var SIMULATION_NORMAL_WIDTH_PT = 25.4 * 28.346;
+var SIMULATION_NORMAL_HEIGHT_PT = 25.4 * 28.346;
+// הצלע הקצרה של A4 היא 21 ס"מ. משאירים 4 מ"מ מרווח כגבול עליון בלבד.
+var SIMULATION_A4_SHORT_SIDE_PT = 20.6 * 28.346;
 
-function fitItemInsideSimulationBounds(item) {
+function fitItemInsideSimulationBounds(item, primaryDimension) {
     if (!item || item.width <= 0 || item.height <= 0) return;
-    // עומד: מגבילים את הגובה. שוכב: מגבילים את הרוחב.
-    // יחס הממדים נשמר, ולכן גם הצלע השנייה נשארת קטנה מהצלע הארוכה.
-    var isPortrait = item.height >= item.width;
-    var ratio = (SIMULATION_A4_LONG_SIDE_PT /
-        (isPortrait ? item.height : item.width)) * 100;
+    var ratio;
+    if (primaryDimension === "width") {
+        // הדמיה אחת או 3/4: רוחב רגיל 25.4 ס"מ;
+        // גובה חריג מוגבל לגובה A4 שוכב פחות 4 מ"מ.
+        ratio = SIMULATION_NORMAL_WIDTH_PT / item.width;
+        if (item.height * ratio > SIMULATION_A4_SHORT_SIDE_PT) {
+            ratio = SIMULATION_A4_SHORT_SIDE_PT / item.height;
+        }
+    } else {
+        // 2 הדמיות: גובה רגיל 25.4 ס"מ;
+        // רוחב חריג מוגבל לרוחב A4 עומד פחות 4 מ"מ.
+        ratio = SIMULATION_NORMAL_HEIGHT_PT / item.height;
+        if (item.width * ratio > SIMULATION_A4_SHORT_SIDE_PT) {
+            ratio = SIMULATION_A4_SHORT_SIDE_PT / item.width;
+        }
+    }
+    ratio *= 100;
     item.resize(ratio, ratio, true, true, true, true, ratio);
 }
 
@@ -198,7 +213,7 @@ function resizeLayer1Aggressive(doc, mainLayer, abRect) {
             if (items[k] != masterGrp) items[k].move(masterGrp, ElementPlacement.PLACEATBEGINNING);
         }
         app.redraw();
-        fitItemInsideSimulationBounds(masterGrp);
+        fitItemInsideSimulationBounds(masterGrp, "width");
         masterGrp.left = abRect[2] - masterGrp.width;
         masterGrp.top = abRect[1] - (Math.abs(abRect[1] - abRect[3]) - masterGrp.height) / 2;
         masterGrp.selected = true;
@@ -206,7 +221,7 @@ function resizeLayer1Aggressive(doc, mainLayer, abRect) {
     } catch (e) {
         try {
             var simGrp = mainLayer.groupItems.getByName("Simulation");
-            fitItemInsideSimulationBounds(simGrp);
+            fitItemInsideSimulationBounds(simGrp, "width");
             simGrp.left = abRect[2] - simGrp.width;
             simGrp.top = abRect[1] - (Math.abs(abRect[1] - abRect[3]) - simGrp.height) / 2;
         } catch (err) {
@@ -245,7 +260,7 @@ function collectFirstArtboardItems(doc, abRect) {
 }
 
 function resizeFirstArtboardSide(doc, abRect) {
-    // הדמיה אחת: עומד עד 29.3 ס"מ גובה, שוכב עד 29.3 ס"מ רוחב, לימין
+    // הדמיה אחת: מידה רגילה, עם מגבלת A4 פחות 4 מ"מ, לימין
     try {
         var layer1 = doc.layers.getByName("1");
         resizeLayer1Aggressive(doc, layer1, abRect);
@@ -264,7 +279,7 @@ function resizeFirstArtboardSide(doc, abRect) {
         }
         app.redraw();
         if (masterGrp.width > 0 && masterGrp.height > 0) {
-            fitItemInsideSimulationBounds(masterGrp);
+            fitItemInsideSimulationBounds(masterGrp, "width");
             masterGrp.left = abRect[2] - masterGrp.width;
             masterGrp.top = abRect[1] - (Math.abs(abRect[1] - abRect[3]) - masterGrp.height) / 2;
         }
@@ -276,7 +291,7 @@ function resizeFirstArtboardSide(doc, abRect) {
 }
 
 function resizeFirstArtboardBottom(doc, abRect) {
-    // 2+ הדמיות: עומד עד 29.3 ס"מ גובה, שוכב עד 29.3 ס"מ רוחב, צמוד לתחתית
+    // 2+ הדמיות: מידה רגילה, עם מגבלת A4 פחות 4 מ"מ, צמוד לתחתית
     try {
         var toMove = collectFirstArtboardItems(doc, abRect);
         if (toMove.length === 0) {
@@ -289,7 +304,7 @@ function resizeFirstArtboardBottom(doc, abRect) {
         }
         app.redraw();
         if (masterGrp.width > 0 && masterGrp.height > 0) {
-            fitItemInsideSimulationBounds(masterGrp);
+            fitItemInsideSimulationBounds(masterGrp, "height");
             // מרכוז אופקי + הצמדה לתחתית הארטבורד
             var pageW = Math.abs(abRect[2] - abRect[0]);
             masterGrp.left = abRect[0] + (pageW - masterGrp.width) / 2;
