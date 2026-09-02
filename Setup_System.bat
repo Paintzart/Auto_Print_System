@@ -29,8 +29,8 @@ if not exist venv (
 
 :: הפעלת הסביבה והתקנת ספריות
 call venv\Scripts\activate
-echo Installing Python Libraries (pywin32, requests, pymupdf)...
-pip install pywin32 requests pymupdf streamlit axios
+echo Installing Python Libraries from requirements.txt...
+pip install -r requirements.txt
 
 :: שלב קריטי: רישום ה-COM עבור אילוסטרייטור ופוטושופ
 echo Registering COM objects...

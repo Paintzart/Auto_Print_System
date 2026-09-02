@@ -1,6 +1,7 @@
 {
     "save_folder_path": "C:/Users/YOUR_USER/Documents/Auto_Print_Output",
     "print_folder_path": "C:/Users/YOUR_USER/Documents/Auto_Print_Output",
+    "qr_scan_base_url": "https://graphicsbenline.netlify.app/qr-entry.html",
     "sidebar_template_path": "C:/path/to/Auto_Print_System/Simulations/Sidebar_Template.ai",
     "is_test_mode": false
 }

@@ -52,7 +52,8 @@ SIDE_DEFAULTS = {
 }
 # הדמיה משתנה: artboard לכל variant באותו קובץ AI
 VARIABLE_SIM_LAYERS_ONLY = False
-VARIABLE_PRINT_BUILD = "unified-main-v9"
+VARIABLE_PRINT_BUILD = "unified-main-v10-pristine-template"
+VARIABLE_SLOT_RETRIES = 3
 
 
 def _variable_grid_cell_size(app, template_path: str) -> tuple[float, float, float, float]:
@@ -435,15 +436,15 @@ def _process_template_variants(
     side_cfg = VARIABLE_SIDE_BASE.get(side, {})
     prefix = side_cfg.get("prefix", loc.get("prefix") or SIDE_TO_PREFIX.get(side, "B"))
 
-    template_session_name = open_variable_template_session(
-        app, template_path, main_doc_name
-    )
+    # Do not reuse the live Illustrator template between variants.  A variant
+    # may remove unused text frames, replace image placeholders, recolor items,
+    # or outline text.  Reusing that mutated document makes later variants
+    # inherit the first variant's contents.  An empty session name makes
+    # place_variable_template_variant open a pristine copy and close it after
+    # every placement.
+    template_session_name = ""
     text_snapshot: dict = {}
-    if template_session_name:
-        text_snapshot = capture_template_text_snapshot(app, template_session_name)
-        print(f"   > [{side}] template session: {template_session_name} ({len(text_snapshot)} text fields)")
-    else:
-        print(f"   > [{side}] WARNING: template session failed — fallback per-variant open")
+    print(f"   > [{side}] pristine template mode: reopen for every variant")
 
     try:
         for vi, variant in enumerate(variants):
@@ -478,19 +479,30 @@ def _process_template_variants(
                 f"   > {side} variant {v_idx} -> page {slot_idx} "
                 f"({layer_name} / {artboard_name}) text keys: {list(text_overrides.keys())}"
             )
-            if not ensure_variable_print_slot(
-                app,
-                side,
-                slot_idx,
-                len(variants),
-                main_doc_name,
-                False,
-                cell_w,
-                cell_h,
-                page_w,
-                page_h,
-                True,
-            ):
+            slot_ready = False
+            for slot_attempt in range(1, VARIABLE_SLOT_RETRIES + 1):
+                slot_ready = ensure_variable_print_slot(
+                    app,
+                    side,
+                    slot_idx,
+                    len(variants),
+                    main_doc_name,
+                    False,
+                    cell_w,
+                    cell_h,
+                    page_w,
+                    page_h,
+                    True,
+                )
+                if slot_ready:
+                    break
+                print(
+                    f"   > Retry {side} variant {v_idx}: slot {slot_idx} "
+                    f"({slot_attempt}/{VARIABLE_SLOT_RETRIES})"
+                )
+                illustrator_purge(app)
+                time.sleep(0.35)
+            if not slot_ready:
                 print(f"   > Skip {side} variant {v_idx}: slot {slot_idx} not ready")
                 continue
             w = place_variable_template_variant(

@@ -5,6 +5,7 @@ import sys
 # --- רשימת הקבצים המלאה למשיכה מה-GitHub שלך ---
 FILES_TO_UPDATE = {
     "run_me.py": "https://raw.githubusercontent.com/Paintzart/Auto_Print_System/refs/heads/main/run_me.py", # הוא מעדכן את עצמו!
+    "Setup_System.bat": "https://raw.githubusercontent.com/Paintzart/Auto_Print_System/refs/heads/main/Setup_System.bat",
     "main.py": "https://raw.githubusercontent.com/Paintzart/Auto_Print_System/refs/heads/main/main.py",
     "vectorizer_ops.py": "https://raw.githubusercontent.com/Paintzart/Auto_Print_System/refs/heads/main/vectorizer_ops.py",
     "server.js": "https://raw.githubusercontent.com/Paintzart/Auto_Print_System/refs/heads/main/server.js",

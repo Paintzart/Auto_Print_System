@@ -3,3 +3,4 @@ requests
 pymupdf
 streamlit
 pillow
+qrcode[pil]

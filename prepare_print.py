@@ -7,9 +7,71 @@ import time
 import json
 import pythoncom
 import shutil
+from urllib.parse import urlencode
 # הגדרת קידוד לקונסול כדי לתמוך בעברית ונתיבים
 sys.stdout.reconfigure(encoding='utf-8')
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+QR_PLACEHOLDER_READY = "QR_READY"
+QR_PLACEHOLDER_PICKED_UP = "QR_PICKED_UP"
+
+
+def create_order_qr_images(order_number):
+    """Create the two temporary QR images consumed by Sidebar_NumOrder.ai."""
+    try:
+        import qrcode
+    except ImportError as exc:
+        raise RuntimeError(
+            "QR support is not installed. Run: pip install -r requirements.txt"
+        ) from exc
+
+    order_id = str(order_number or "").strip()
+    if not order_id:
+        raise ValueError("Cannot create QR codes without an order number")
+
+    qr_dir = os.path.join(BASE_DIR, "temp_qr")
+    os.makedirs(qr_dir, exist_ok=True)
+    safe_order_id = re.sub(r"[^A-Za-z0-9_-]+", "_", order_id)
+    scan_base_url = "https://graphicsbenline.netlify.app/qr-entry.html"
+    try:
+        config_path = os.path.join(BASE_DIR, "config.json")
+        with open(config_path, "r", encoding="utf-8") as config_file:
+            config = json.load(config_file)
+        configured_url = str(config.get("qr_scan_base_url") or "").strip()
+        if configured_url:
+            scan_base_url = configured_url.split("#", 1)[0]
+    except Exception:
+        pass
+
+    # The order details live in the URL fragment. Browsers do not send fragments
+    # to the hosting server, while both phone cameras and keyboard scanners retain it.
+    qr_specs = {
+        "ready": scan_base_url + "#" + urlencode({"action": "ready", "orderId": order_id}),
+        "picked_up": scan_base_url + "#" + urlencode({"action": "picked_up", "orderId": order_id}),
+    }
+    paths = {}
+    for action, payload in qr_specs.items():
+        path = os.path.join(qr_dir, f"{safe_order_id}_{action}.png")
+        qr = qrcode.QRCode(
+            version=None,
+            error_correction=qrcode.constants.ERROR_CORRECT_H,
+            box_size=12,
+            border=4,
+        )
+        qr.add_data(payload)
+        qr.make(fit=True)
+        qr.make_image(fill_color="black", back_color="white").save(path, format="PNG", optimize=True)
+        paths[action] = os.path.abspath(path).replace("\\", "/")
+    return paths
+
+
+def remove_temporary_qr_images(paths):
+    for path in (paths or {}).values():
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+        except OSError:
+            pass
 # ========================================================
 # הוספת Sidebar_NumOrder (מספר הזמנה) לדף הראשון — כמו פרסומת
 JSX_APPLY_NUMORDER_HELPER = r'''
@@ -1383,6 +1445,7 @@ def run_photoshop_processing(files_list, default_contract_px, thickness_map=None
 def create_simulation_summary_file(source_file_path, order_number, output_folder):
     """יוצר קובץ PDF מסכם של ההדמיות + Sidebar_NumOrder עם 4 ספרות אחרונות"""
     pythoncom.CoInitialize()
+    qr_paths = {}
     try:
         app = win32com.client.Dispatch("Illustrator.Application")
     except:
@@ -1400,6 +1463,11 @@ def create_simulation_summary_file(source_file_path, order_number, output_folder
     # Sidebar_NumOrder — מתיקיית Simulations ליד הקוד (כמו שאר ההדמיות)
     sidebar_numorder_path = os.path.join(BASE_DIR, "Simulations", "Sidebar_NumOrder.ai").replace("\\", "/")
     sidebar_numorder_script = os.path.join(BASE_DIR, "sidebar_numorder_logic.jsx").replace("\\", "/")
+    try:
+        qr_paths = create_order_qr_images(order_number)
+        print(f"   > Created QR images for order {order_number}")
+    except Exception as e:
+        print(f"   ⚠ Could not create QR images: {e}")
     # שמירה גם ל-current_job.json לגיבוי לסקריפט
     try:
         job_path = os.path.join(BASE_DIR, "current_job.json")
@@ -1414,6 +1482,8 @@ def create_simulation_summary_file(source_file_path, order_number, output_folder
             "order_last4": last_4,
             "sidebar_numorder_path": sidebar_numorder_path,
             "show_numorder_sidebar": True,
+            "qr_ready_path": qr_paths.get("ready", ""),
+            "qr_picked_up_path": qr_paths.get("picked_up", ""),
         })
         with open(job_path, "w", encoding="utf-8") as jf:
             json.dump(job, jf, ensure_ascii=False, indent=4)
@@ -1474,6 +1544,8 @@ def create_simulation_summary_file(source_file_path, order_number, output_folder
             print(f"   > Created Summary: {final_pdf_name}")
     except Exception as e:
         print(f"   Error creating summary: {e}")
+    finally:
+        remove_temporary_qr_images(qr_paths)
 # 3. נקודת כניסה ראשית
 # ========================================================
 if __name__ == "__main__":

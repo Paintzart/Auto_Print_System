@@ -4,11 +4,11 @@
  *
  * מצב "side" (הדמיה אחת / לרוחב):
  *   Artboard 1, שכבת Sidebar, NUM1..NUM4 (ספרה לכל תיבה),
- *   רוחב 23 ס"מ, הצמדה לימין.
+ *   עומד עד 29.3 ס"מ גובה / שוכב עד 29.3 ס"מ רוחב, הצמדה לימין.
  *
  * מצב "bottom" (2+ הדמיות בעמוד):
  *   Artboard 2, שכבת sidebar2, NUM (כל המספר),
- *   גובה 24 ס"מ, הצמדה לתחתית.
+ *   עומד עד 29.3 ס"מ גובה / שוכב עד 29.3 ס"מ רוחב, הצמדה לתחתית.
  *
  * קלט:
  *   $.global.targetMasterDoc, numOrderLast4, numOrderSidebarPath,
@@ -55,6 +55,66 @@ function findTextFrameByName(container, name) {
         }
     } catch (e3) {}
     return null;
+}
+
+function findPageItemByName(container, name) {
+    if (!container) return null;
+    try {
+        if (container.pageItems) {
+            for (var i = 0; i < container.pageItems.length; i++) {
+                var item = container.pageItems[i];
+                if (item.name === name) return item;
+                if (item.typename === "GroupItem") {
+                    var nested = findPageItemByName(item, name);
+                    if (nested) return nested;
+                }
+            }
+        }
+    } catch (e) {}
+    try {
+        if (container.layers) {
+            for (var j = 0; j < container.layers.length; j++) {
+                var inLayer = findPageItemByName(container.layers[j], name);
+                if (inLayer) return inLayer;
+            }
+        }
+    } catch (e2) {}
+    return null;
+}
+
+function replaceQrPlaceholder(doc, container, placeholderName, imagePath) {
+    if (!imagePath) {
+        $.writeln(placeholderName + ": QR image path is empty");
+        return false;
+    }
+    var placeholder = findPageItemByName(container, placeholderName);
+    if (!placeholder) {
+        $.writeln(placeholderName + " not found in Sidebar_NumOrder.ai");
+        return false;
+    }
+    var qrFile = new File(String(imagePath));
+    if (!qrFile.exists) {
+        $.writeln(placeholderName + ": QR image not found: " + imagePath);
+        return false;
+    }
+    try {
+        var bounds = placeholder.geometricBounds;
+        var targetParent = placeholder.parent;
+        var qrItem = doc.placedItems.add();
+        qrItem.file = qrFile;
+        qrItem.left = bounds[0];
+        qrItem.top = bounds[1];
+        qrItem.width = Math.abs(bounds[2] - bounds[0]);
+        qrItem.height = Math.abs(bounds[1] - bounds[3]);
+        try { qrItem.move(targetParent, ElementPlacement.PLACEATBEGINNING); } catch (eMove) {}
+        qrItem.embed();
+        placeholder.remove();
+        $.writeln(placeholderName + " replaced successfully");
+        return true;
+    } catch (e) {
+        $.writeln("Failed replacing " + placeholderName + ": " + e);
+        return false;
+    }
 }
 
 function normalizeLast4(digits) {
@@ -107,6 +167,19 @@ function getLayerByNames(doc, names) {
     return null;
 }
 
+// A4 בצלע הארוכה הוא 29.7 ס"מ. משאירים 4 מ"מ מרווח.
+var SIMULATION_A4_LONG_SIDE_PT = 29.3 * 28.346;
+
+function fitItemInsideSimulationBounds(item) {
+    if (!item || item.width <= 0 || item.height <= 0) return;
+    // עומד: מגבילים את הגובה. שוכב: מגבילים את הרוחב.
+    // יחס הממדים נשמר, ולכן גם הצלע השנייה נשארת קטנה מהצלע הארוכה.
+    var isPortrait = item.height >= item.width;
+    var ratio = (SIMULATION_A4_LONG_SIDE_PT /
+        (isPortrait ? item.height : item.width)) * 100;
+    item.resize(ratio, ratio, true, true, true, true, ratio);
+}
+
 function resizeLayer1Aggressive(doc, mainLayer, abRect) {
     try {
         var simContainer = mainLayer.layers.getByName("Simulation");
@@ -125,9 +198,7 @@ function resizeLayer1Aggressive(doc, mainLayer, abRect) {
             if (items[k] != masterGrp) items[k].move(masterGrp, ElementPlacement.PLACEATBEGINNING);
         }
         app.redraw();
-        var targetWidth = 23 * 28.346;
-        var ratio = (targetWidth / masterGrp.width) * 100;
-        masterGrp.resize(ratio, ratio, true, true, true, true, ratio);
+        fitItemInsideSimulationBounds(masterGrp);
         masterGrp.left = abRect[2] - masterGrp.width;
         masterGrp.top = abRect[1] - (Math.abs(abRect[1] - abRect[3]) - masterGrp.height) / 2;
         masterGrp.selected = true;
@@ -135,8 +206,7 @@ function resizeLayer1Aggressive(doc, mainLayer, abRect) {
     } catch (e) {
         try {
             var simGrp = mainLayer.groupItems.getByName("Simulation");
-            var ratio2 = (23 * 28.346 / simGrp.width) * 100;
-            simGrp.resize(ratio2, ratio2, true, true, true, true, ratio2);
+            fitItemInsideSimulationBounds(simGrp);
             simGrp.left = abRect[2] - simGrp.width;
             simGrp.top = abRect[1] - (Math.abs(abRect[1] - abRect[3]) - simGrp.height) / 2;
         } catch (err) {
@@ -175,7 +245,7 @@ function collectFirstArtboardItems(doc, abRect) {
 }
 
 function resizeFirstArtboardSide(doc, abRect) {
-    // הדמיה אחת: שכבה 1 / Simulation → רוחב 23 ס"מ לימין
+    // הדמיה אחת: עומד עד 29.3 ס"מ גובה, שוכב עד 29.3 ס"מ רוחב, לימין
     try {
         var layer1 = doc.layers.getByName("1");
         resizeLayer1Aggressive(doc, layer1, abRect);
@@ -193,9 +263,8 @@ function resizeFirstArtboardSide(doc, abRect) {
             try { toMove[m].move(masterGrp, ElementPlacement.PLACEATBEGINNING); } catch (e2) {}
         }
         app.redraw();
-        if (masterGrp.width > 0) {
-            var ratio = ((23 * 28.346) / masterGrp.width) * 100;
-            masterGrp.resize(ratio, ratio, true, true, true, true, ratio);
+        if (masterGrp.width > 0 && masterGrp.height > 0) {
+            fitItemInsideSimulationBounds(masterGrp);
             masterGrp.left = abRect[2] - masterGrp.width;
             masterGrp.top = abRect[1] - (Math.abs(abRect[1] - abRect[3]) - masterGrp.height) / 2;
         }
@@ -207,7 +276,7 @@ function resizeFirstArtboardSide(doc, abRect) {
 }
 
 function resizeFirstArtboardBottom(doc, abRect) {
-    // 2+ הדמיות: גובה 24 ס"מ, צמוד לתחתית
+    // 2+ הדמיות: עומד עד 29.3 ס"מ גובה, שוכב עד 29.3 ס"מ רוחב, צמוד לתחתית
     try {
         var toMove = collectFirstArtboardItems(doc, abRect);
         if (toMove.length === 0) {
@@ -219,10 +288,8 @@ function resizeFirstArtboardBottom(doc, abRect) {
             try { toMove[m].move(masterGrp, ElementPlacement.PLACEATBEGINNING); } catch (e2) {}
         }
         app.redraw();
-        if (masterGrp.height > 0) {
-            var targetHeight = 24 * 28.346;
-            var ratio = (targetHeight / masterGrp.height) * 100;
-            masterGrp.resize(ratio, ratio, true, true, true, true, ratio);
+        if (masterGrp.width > 0 && masterGrp.height > 0) {
+            fitItemInsideSimulationBounds(masterGrp);
             // מרכוז אופקי + הצמדה לתחתית הארטבורד
             var pageW = Math.abs(abRect[2] - abRect[0]);
             masterGrp.left = abRect[0] + (pageW - masterGrp.width) / 2;
@@ -356,6 +423,11 @@ function mainNumOrder() {
             setNumDigitsSide(sbDoc, last4);
             setNumDigitsSide(sbLayer, last4);
         }
+
+        var qrReadyPath = (job && job.qr_ready_path) ? String(job.qr_ready_path) : "";
+        var qrPickedUpPath = (job && job.qr_picked_up_path) ? String(job.qr_picked_up_path) : "";
+        replaceQrPlaceholder(sbDoc, sbLayer, "QR_READY", qrReadyPath);
+        replaceQrPlaceholder(sbDoc, sbLayer, "QR_PICKED_UP", qrPickedUpPath);
 
         var srcAbRect = sbDoc.artboards[srcAbIndex].artboardRect;
         $.writeln("Source artboard " + (srcAbIndex + 1) + ": " + srcAbRect);
