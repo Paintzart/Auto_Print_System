@@ -922,7 +922,19 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
         close_all_illustrator_documents(app)
         time.sleep(0.5)
         print(f"🔍 DEBUG: Running JavaScript file...")
-        app.DoJavaScriptFile(script_path)
+        # DoJavaScriptFile is not reliable across Illustrator COM registrations.
+        # On some workstations it reaches Illustrator without the file argument and
+        # Illustrator reports "JavaScript code was missing".  Send a small, real
+        # JavaScript snippet instead and let ExtendScript load the file itself.
+        jsx_script_path = script_path.replace("\\", "/")
+        eval_file_js = (
+            "(function () { "
+            f"var scriptFile = new File({json.dumps(jsx_script_path)}); "
+            "if (!scriptFile.exists) throw new Error('Merge script not found: ' + scriptFile.fsName); "
+            "return $.evalFile(scriptFile); "
+            "}());"
+        )
+        app.DoJavaScript(eval_file_js)
         print(f"🔍 DEBUG: JavaScript file executed")
         print(f"🔍 DEBUG: Number of open documents: {app.Documents.Count}")
         if app.Documents.Count > 0:
