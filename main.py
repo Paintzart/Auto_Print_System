@@ -904,12 +904,9 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
     }}
     main();
     """
-    script_path = os.path.join(BASE_DIR, "run_merge_batch.jsx")
-    with open(script_path, "w", encoding="utf-8") as f:
-        f.write(jsx_content)
     try:
         print(f"\n🔍 DEBUG: About to run merge script...")
-        print(f"🔍 DEBUG: Script path: {script_path}")
+        print(f"🔍 DEBUG: Sending merge JavaScript directly to Illustrator")
         print(f"🔍 DEBUG: Files to merge: {files_list}")
         for fp in files_list:
             if not os.path.exists(fp):
@@ -921,21 +918,12 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
         print(f"🔍 DEBUG: Illustrator app connected")
         close_all_illustrator_documents(app)
         time.sleep(0.5)
-        print(f"🔍 DEBUG: Running JavaScript file...")
-        # DoJavaScriptFile is not reliable across Illustrator COM registrations.
-        # On some workstations it reaches Illustrator without the file argument and
-        # Illustrator reports "JavaScript code was missing".  Send a small, real
-        # JavaScript snippet instead and let ExtendScript load the file itself.
-        jsx_script_path = script_path.replace("\\", "/")
-        eval_file_js = (
-            "(function () { "
-            f"var scriptFile = new File({json.dumps(jsx_script_path)}); "
-            "if (!scriptFile.exists) throw new Error('Merge script not found: ' + scriptFile.fsName); "
-            "return $.evalFile(scriptFile); "
-            "}());"
-        )
-        app.DoJavaScript(eval_file_js)
-        print(f"🔍 DEBUG: JavaScript file executed")
+        print(f"🔍 DEBUG: Running JavaScript directly...")
+        # Avoid DoJavaScriptFile and $.evalFile entirely.  Both depend on
+        # Illustrator reopening a temporary JSX file and can intermittently fail
+        # with "JavaScript code was missing" or ExtendScript Error 52 (I/O).
+        app.DoJavaScript(jsx_content)
+        print(f"🔍 DEBUG: JavaScript executed")
         print(f"🔍 DEBUG: Number of open documents: {app.Documents.Count}")
         if app.Documents.Count > 0:
             doc = app.ActiveDocument
