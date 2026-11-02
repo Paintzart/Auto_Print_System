@@ -1,8 +1,18 @@
 #target illustrator
 // --- פונקציה לקריאת הנתונים שפייתון שולח (נתיבים ושמות קבצים) ---
 function getJobData() {
-    var scriptFile = new File($.fileName);
-    var dataFile = new File(scriptFile.path + "/current_job.json");
+    // When this script is evaluated from memory, $.fileName belongs to the
+    // caller (or can be empty). Python supplies the exact job path instead.
+    var dataFile = null;
+    try {
+        if ($.global.sidebarJobPath) {
+            dataFile = new File($.global.sidebarJobPath);
+        }
+    } catch (e) {}
+    if (!dataFile) {
+        var scriptFile = new File($.fileName);
+        dataFile = new File(scriptFile.path + "/current_job.json");
+    }
     if (!dataFile.exists) return null;
     dataFile.open("r");
     var content = dataFile.read();

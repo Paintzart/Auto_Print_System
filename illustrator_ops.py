@@ -26,6 +26,40 @@ def run_jsx(app, s: str):
         print(f"   > JSX warning: {e}")
 
 
+def open_illustrator_document(path: str, attempts: int = 4):
+    """Open an Illustrator document, reconnecting after transient COM/RPC failures."""
+    path = os.path.abspath(path)
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"Illustrator template not found: {path}")
+
+    last_error = None
+    for attempt in range(1, attempts + 1):
+        app = None
+        try:
+            # Dispatch reconnects to the running instance after Illustrator has
+            # invalidated an older COM proxy.
+            app = win32com.client.Dispatch("Illustrator.Application")
+            app.UserInteractionLevel = -1
+            doc = app.Open(path)
+            return doc, app
+        except Exception as exc:
+            last_error = exc
+            if attempt >= attempts:
+                break
+            print(
+                f"   WARNING: Illustrator open failed (attempt {attempt}/{attempts}): "
+                f"{exc}; reconnecting..."
+            )
+            doc = None
+            app = None
+            time.sleep(0.8 * attempt)
+
+    raise RuntimeError(
+        f"Illustrator could not open {os.path.basename(path)} after "
+        f"{attempts} attempts: {last_error}"
+    ) from last_error
+
+
 def save_native_ai(doc, path: str) -> None:
     """שמירה כ-.ai native (לא PDF עטוף ב-.ai) — נדרש לאיחוד merge."""
     path = os.path.abspath(path)
@@ -3303,9 +3337,7 @@ def variable_layer_and_artboard(
     return layer, artboard
 def open_and_color_template(path: str, h1: str, h2: str, is_split: bool, prod: str="Shirt"):
     print(f"--- Opening AI: {os.path.basename(path)} ---")
-    app = win32com.client.Dispatch("Illustrator.Application")
-    app.UserInteractionLevel = -1
-    doc = app.Open(path)
+    doc, app = open_illustrator_document(path)
     r1, g1, b1 = hex_to_rgb(h1)
     r2, g2, b2 = hex_to_rgb(h2)
     # חישוב צבע ה-Stroke (המיתר) - לבן לכהה, שחור לבהיר

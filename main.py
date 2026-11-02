@@ -624,6 +624,15 @@ def apply_sidebar_to_open_document(app, doc_name: str, order_data: Optional[Dict
     if not os.path.exists(sidebar_logic_path):
         print("   ⚠ Sidebar template script missing — skip ad")
         return False
+    with open(sidebar_logic_path, "r", encoding="utf-8-sig") as f:
+        sidebar_source = f.read()
+    # #target is an ExtendScript file directive; it is not valid inside eval().
+    sidebar_source = sidebar_source.replace("#target illustrator", "", 1)
+    sidebar_source_js = json.dumps(sidebar_source, ensure_ascii=True)
+    sidebar_job_path_js = json.dumps(
+        os.path.join(BASE_DIR, "current_job.json").replace("\\", "/"),
+        ensure_ascii=True,
+    )
     safe_doc = doc_name.replace("\\", "\\\\").replace('"', '\\"')
     jsx = f"""
     #target illustrator
@@ -645,8 +654,9 @@ def apply_sidebar_to_open_document(app, doc_name: str, order_data: Optional[Dict
             }}
         }}
         $.global.targetMasterDoc = doc;
-        var sideFile = new File("{sidebar_logic_path}");
-        if (sideFile.exists) $.evalFile(sideFile);
+        $.global.sidebarJobPath = {sidebar_job_path_js};
+        var sidebarSource = {sidebar_source_js};
+        eval(sidebarSource);
     }})();
     """
     try:
@@ -664,7 +674,8 @@ def apply_sidebar_to_open_document(app, doc_name: str, order_data: Optional[Dict
 # -----------------------------------------------------------
 def create_and_run_merge_script(files_list, output_pdf, order_data=None):
     pythoncom.CoInitialize()
-    if not files_list: return
+    if not files_list:
+        raise ValueError("Merge requires at least one input file")
 # חילוץ רשימת המוצרים שהוזמנו כדי למנוע כפילויות בסרגל הצד
     ordered_products = []
     if order_data and 'products' in order_data:
@@ -722,6 +733,15 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
     sidebar_exists = os.path.exists(sidebar_logic_path)
     print(f"🔍 DEBUG: sidebar_logic.jsx exists: {sidebar_exists}")
     print(f"🔍 DEBUG: sidebar_logic.jsx path: {sidebar_logic_path}")
+    sidebar_source_js = "null"
+    if sidebar_exists:
+        with open(sidebar_logic_path, "r", encoding="utf-8-sig") as f:
+            sidebar_source = f.read().replace("#target illustrator", "", 1)
+            sidebar_source_js = json.dumps(sidebar_source, ensure_ascii=True)
+    sidebar_job_path_js = json.dumps(
+        os.path.join(BASE_DIR, "current_job.json").replace("\\", "/"),
+        ensure_ascii=True,
+    )
     jsx_content = f"""
     #target illustrator
     var files = {json.dumps(js_files)};
@@ -780,7 +800,7 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
             var row = Math.floor(j / COLS);
             processNextFileFast(masterDoc, files[j], (j+1).toString(), col * STEP_X, -(row * STEP_Y));
         }}
-        var sideFile = new File("{sidebar_logic_path}");
+        var sidebarSource = {sidebar_source_js};
         var showSidebar = {str(show_sidebar).lower()};
         var sidebarAlreadyApplied = {str(sidebar_already_applied).lower()};
         function docHasSidebarLayer(doc) {{
@@ -797,9 +817,9 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
         $.writeln("=== MERGE SCRIPT: Sidebar check ===");
         $.writeln("showSidebar: " + showSidebar);
         $.writeln("sidebarAlreadyApplied: " + sidebarAlreadyApplied);
-        $.writeln("sideFile exists: " + sideFile.exists);
+        $.writeln("sidebar source loaded: " + (sidebarSource !== null));
         $.writeln("masterDoc name: " + masterDoc.name);
-        if (showSidebar && !sidebarAlreadyApplied && !docHasSidebarLayer(masterDoc) && sideFile.exists) {{
+        if (showSidebar && !sidebarAlreadyApplied && !docHasSidebarLayer(masterDoc) && sidebarSource !== null) {{
             $.writeln("--- Calling sidebar_logic.jsx ---");
             // העברת masterDoc כמשתנה גלובלי ל-sidebar_logic.jsx
             var targetDoc = masterDoc;
@@ -809,9 +829,10 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
             $.writeln("Active document after activation: " + app.activeDocument.name);
             // הגדרת משתנה גלובלי ש-sidebar_logic.jsx יוכל להשתמש בו
             $.global.targetMasterDoc = targetDoc;
+            $.global.sidebarJobPath = {sidebar_job_path_js};
             $.writeln("targetMasterDoc set in global");
-            $.writeln("Evaluating sidebar_logic.jsx file...");
-            $.evalFile(sideFile);
+            $.writeln("Evaluating sidebar logic from memory...");
+            eval(sidebarSource);
             $.writeln("sidebar_logic.jsx execution completed");
             // וידוא ש-masterDoc נשאר פעיל אחרי הוספת התפריט הצד
             $.writeln("Reactivating targetDoc after sidebar logic...");
@@ -822,7 +843,7 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
             $.writeln("Document artboards count: " + targetDoc.artboards.length);
             $.writeln("--- Sidebar logic complete ---");
         }} else {{
-            $.writeln("Sidebar skipped (showSidebar=" + showSidebar + ", alreadyApplied=" + sidebarAlreadyApplied + ", hasLayer=" + docHasSidebarLayer(masterDoc) + ", fileExists=" + sideFile.exists + ")");
+            $.writeln("Sidebar skipped (showSidebar=" + showSidebar + ", alreadyApplied=" + sidebarAlreadyApplied + ", hasLayer=" + docHasSidebarLayer(masterDoc) + ", sourceLoaded=" + (sidebarSource !== null) + ")");
         }}
         reorderArtboardsSafe(masterDoc);
     }}
@@ -973,10 +994,13 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
             print(f"✅ DEBUG: PDF saved successfully")
             doc.Close(2)
             print(f"✅ DEBUG: Document closed")
+            return True
+        raise RuntimeError("Illustrator merge completed without an open output document")
     except Exception as e:
         print(f"Error during execution/save: {e}")
         import traceback
         traceback.print_exc()
+        raise RuntimeError(f"Illustrator merge failed: {e}") from e
         # --- MAIN ENTRY ---
 if __name__ == "__main__":
     if len(sys.argv) > 1:
