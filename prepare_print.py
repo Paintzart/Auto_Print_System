@@ -1560,12 +1560,14 @@ if __name__ == "__main__":
     contract_px = int(thickness.replace("px", ""))
     thickness_mode = "uniform"
     thickness_map = {}
+    full_print_only = False
     if order_payload_path and os.path.exists(order_payload_path):
         try:
             with open(order_payload_path, "r", encoding="utf-8") as f:
                 payload_main = json.load(f)
             thickness_mode = (payload_main.get("thickness_mode") or payload_main.get("thicknessMode") or "uniform").lower()
             logo_thicknesses = payload_main.get("logo_thicknesses") or payload_main.get("logoThicknesses") or []
+            full_print_only = bool(payload_main.get("full_print_only") or payload_main.get("fullPrintOnly"))
             if thickness_mode == "per_location":
                 thickness_map = build_thickness_map(logo_thicknesses)
                 print(f"   [דיבוג] עובי לוגו לפי מיקום: {len(thickness_map)} הגדרות, ברירת מחדל {contract_px}px")
@@ -1576,11 +1578,14 @@ if __name__ == "__main__":
         output_base = config.get("print_folder_path", "C:/Temp/Print")
     # יצירת תיקיית הבסיס אם היא לא קיימת (ללא תיקיית משנה לפי מספר הזמנה)
     if not os.path.exists(output_base): os.makedirs(output_base)
-    print("Step 1: Illustrator Splitting...")
-    generated = run_illustrator_split(input_file, order_id, output_base, order_payload_path)
-    # --- התוספת החדשה: יצירת קובץ הדמיות ---
+    generated = []
+    if not full_print_only:
+        print("Step 1: Illustrator Splitting...")
+        generated = run_illustrator_split(input_file, order_id, output_base, order_payload_path)
+    else:
+        print("Step 1: Full print file only — skipping side files.")
+    # יצירת קובץ ההדמיות המלא, כולל מספר הזמנה וברקודים
     create_simulation_summary_file(input_file, order_id, output_base)
-    # ---------------------------------------
     if generated:
         print("Step 2: Photoshop Processing...")
         run_photoshop_processing(

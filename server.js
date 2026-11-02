@@ -46,6 +46,7 @@ async function getR2SignedUrl(originalUrl) {
 }
 // === כפתור ורוד ===
 // Body: orderId, fileUrl, thickness, products (מהמסך), white_print_locations (מערך מ־getWhitePrintLocations).
+// full_print_only / fullPrintOnly: יוצר רק XXXX_print.pdf המלא (הדמיה + מספר הזמנה + ברקודים), ללא קבצי צדדים.
 // white_print_locations: רק מיקומים עם הדפס לבן, למשל [ { product: "1", location: "front" }, { product: "1", location: "left_sleeve" } ].
 // הדפס משתנה: location בלי variant_index (למשל back) → כל Print_Back_1, Print_Back_2...; variant_index → variant בודד.
 // thickness_mode: "uniform" (ברירת מחדל – אותו עובי לכולם) | "per_location" (עובי לפי מוצר/צד).
@@ -53,14 +54,15 @@ async function getR2SignedUrl(originalUrl) {
 // thickness נשאר ברירת מחדל לכל מיקום שלא מופיע ב-logo_thicknesses.
 // אם ריק [] – לא כותבים קובץ ולא מעבירים ארגומנט; הפייתון יריץ זיהוי אוטומטי.
 app.post('/prepare-print', async (req, res) => {
-    let { orderId, fileUrl, thickness, white_print_locations, whitePrintLocations, front_print_2pocket, frontPrint2Pocket, item_quantities, itemQuantities, thickness_mode, thicknessMode, logo_thicknesses, logoThicknesses } = req.body;
+    let { orderId, fileUrl, thickness, white_print_locations, whitePrintLocations, front_print_2pocket, frontPrint2Pocket, item_quantities, itemQuantities, thickness_mode, thicknessMode, logo_thicknesses, logoThicknesses, full_print_only, fullPrintOnly } = req.body;
     // תמיכה גם ב־camelCase מהקליינט
     const listFromBody = white_print_locations ?? whitePrintLocations;
     const front2Pocket = front_print_2pocket ?? frontPrint2Pocket ?? false;
     const thicknessModeVal = String(thickness_mode ?? thicknessMode ?? 'uniform').toLowerCase();
     const logoThicknessList = logo_thicknesses ?? logoThicknesses ?? [];
     const hasPerLocationThickness = thicknessModeVal === 'per_location';
-    console.log(`\n🌸 בקשה להכנת דפוס: הזמנה ${orderId}${front2Pocket ? ' (הדפס קידמי 2Pocket – A4 לרוחב)' : ''}${hasPerLocationThickness ? ' (עובי לוגו לפי מוצר/צד)' : ''}`);
+    const fullPrintOnlyVal = full_print_only ?? fullPrintOnly ?? false;
+    console.log(`\n🌸 בקשה להכנת דפוס: הזמנה ${orderId}${fullPrintOnlyVal ? ' (קובץ הדפסה מלא בלבד)' : ''}${front2Pocket ? ' (הדפס קידמי 2Pocket – A4 לרוחב)' : ''}${hasPerLocationThickness ? ' (עובי לוגו לפי מוצר/צד)' : ''}`);
     // דיבוג: מה התקבל ב־white_print_locations
     const hasList = listFromBody != null && Array.isArray(listFromBody) && listFromBody.length > 0;
     console.log(`   [דיבוג] white_print_locations: ${listFromBody == null ? 'לא נשלח' : Array.isArray(listFromBody) ? `מערך באורך ${listFromBody.length}` : typeof listFromBody}`);
@@ -92,14 +94,16 @@ app.post('/prepare-print', async (req, res) => {
             item_quantities: hasItemQty ? itemQtyList : [],
             thickness_mode: thicknessModeVal,
             logo_thicknesses: hasPerLocationThickness && Array.isArray(logoThicknessList) ? logoThicknessList : [],
+            full_print_only: Boolean(fullPrintOnlyVal),
         };
-        if (hasList || front2Pocket || hasItemQty || hasPerLocationThickness) {
+        if (hasList || front2Pocket || hasItemQty || hasPerLocationThickness || fullPrintOnlyVal) {
             orderPayloadPath = path.join(TEMP_DIR, `order_${orderId}_${Date.now()}_payload.json`);
             fs.writeFileSync(orderPayloadPath, JSON.stringify(payload), 'utf8');
             if (hasList) console.log(`   > רשימת הדפס לבן: ${listFromBody.length} מיקומים, קובץ: ${orderPayloadPath}`);
             if (front2Pocket) console.log(`   > הדפס קידמי 2Pocket (A4 לרוחב) – כפתור סגול`);
             if (hasItemQty) console.log(`   > כמויות פריטים: ${itemQtyList.length} מיקומים`);
             if (hasPerLocationThickness) console.log(`   > עובי לוגו לפי מיקום: ${Array.isArray(logoThicknessList) ? logoThicknessList.length : 0} הגדרות, ברירת מחדל ${thickness || '2px'}`);
+            if (fullPrintOnlyVal) console.log(`   > ייווצר רק קובץ ההדפסה המלא, ללא קובצי צדדים`);
         } else {
             console.log(`   > אין רשימת הדפס לבן – יורץ זיהוי אוטומטי`);
         }
@@ -112,7 +116,7 @@ app.post('/prepare-print', async (req, res) => {
         pythonProcess.on('close', (code) => {
             try { if (fs.existsSync(localFilePath)) fs.unlinkSync(localFilePath); } catch(e) {}
             try { if (orderPayloadPath && fs.existsSync(orderPayloadPath)) fs.unlinkSync(orderPayloadPath); } catch(e) {}
-            if (code === 0) res.json({ success: true, message: "הקבצים מוכנים!" });
+            if (code === 0) res.json({ success: true, message: fullPrintOnlyVal ? "קובץ ההדפסה המלא מוכן!" : "הקבצים מוכנים!" });
             else res.status(500).json({ success: false, message: "עיבוד הפייתון נכשל" });
         });
     } catch (error) {
