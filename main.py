@@ -536,10 +536,21 @@ def process_single_product_to_temp(order, idx, folder, is_wholesale=False, order
         out_name = f"temp_{idx}.ai"
         out_path = os.path.join(TEMP_AI_DIR, out_name)
         save_native_ai(doc, out_path)
-        if is_pdf_disguised_as_ai(out_path):
-            print(f"   ⚠ Saved {out_name} still looks like PDF — merge may fail")
+        saved_as_pdf = is_pdf_disguised_as_ai(out_path)
         doc.Close(2)
-        print(f"   > Saved: {out_name}")
+        doc = None
+
+        # Some Illustrator versions occasionally write PDF data even though an
+        # .ai path and IllustratorSaveOptions were supplied. Never pass that
+        # mismatched extension to the merge script: Illustrator can reject it
+        # with ExtendScript Error 23. Give the file its real extension instead.
+        if saved_as_pdf:
+            pdf_path = os.path.splitext(out_path)[0] + ".pdf"
+            os.replace(out_path, pdf_path)
+            print(f"   ⚠ {out_name} contained PDF data; normalized to {os.path.basename(pdf_path)}")
+            out_path = pdf_path
+
+        print(f"   > Saved: {os.path.basename(out_path)}")
         return out_path
     except Exception as e:
         print(f"Error processing product {idx+1}: {e}")
@@ -985,12 +996,42 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
                     print(f"⚠️ WARNING: No Sidebar layer found in document!")
             except Exception as e:
                 print(f"⚠️ DEBUG: Error checking layers: {e}")
-            pdf_options = win32com.client.Dispatch("Illustrator.PDFSaveOptions")
-            pdf_options.PDFPreset = "[High Quality Print]"
-            pdf_options.PreserveEditability = True
-            final_path = output_pdf.replace("/", "\\")
+            final_path = os.path.abspath(output_pdf).replace("/", "\\")
+            output_dir = os.path.dirname(final_path)
+            if not output_dir:
+                raise ValueError(f"Invalid PDF output path: {output_pdf!r}")
+            os.makedirs(output_dir, exist_ok=True)
+
             print(f"💾 DEBUG: Saving PDF to: {final_path}")
-            doc.SaveAs(final_path, pdf_options)
+            try:
+                # Keep the original, editable high-quality output when Illustrator
+                # can create it. Large merged documents can make Illustrator return
+                # the opaque CONF error while embedding all editing data.
+                pdf_options = win32com.client.Dispatch("Illustrator.PDFSaveOptions")
+                pdf_options.PDFPreset = "[High Quality Print]"
+                pdf_options.PreserveEditability = True
+                doc.SaveAs(final_path, pdf_options)
+            except Exception as first_save_error:
+                print(
+                    "⚠️ DEBUG: Editable PDF save failed; retrying with "
+                    f"safe PDF options: {first_save_error}"
+                )
+                # A failed SaveAs may leave an incomplete file which itself causes
+                # the next SaveAs to request confirmation (Illustrator error CONF).
+                if os.path.exists(final_path):
+                    try:
+                        os.remove(final_path)
+                    except OSError as cleanup_error:
+                        raise RuntimeError(
+                            f"Cannot replace incomplete PDF {final_path}: {cleanup_error}"
+                        ) from first_save_error
+
+                safe_pdf_options = win32com.client.Dispatch("Illustrator.PDFSaveOptions")
+                safe_pdf_options.PreserveEditability = False
+                doc.SaveAs(final_path, safe_pdf_options)
+
+            if not os.path.isfile(final_path) or os.path.getsize(final_path) == 0:
+                raise RuntimeError(f"Illustrator reported success but PDF is missing or empty: {final_path}")
             print(f"✅ DEBUG: PDF saved successfully")
             doc.Close(2)
             print(f"✅ DEBUG: Document closed")
