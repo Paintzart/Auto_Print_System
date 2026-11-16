@@ -954,7 +954,37 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
         # Avoid DoJavaScriptFile and $.evalFile entirely.  Both depend on
         # Illustrator reopening a temporary JSX file and can intermittently fail
         # with "JavaScript code was missing" or ExtendScript Error 52 (I/O).
-        app.DoJavaScript(jsx_content)
+        # Illustrator can briefly return a valid Application COM object before
+        # its scripting plug-in has exposed DoJavaScript.  In that state normal
+        # properties (Documents, Version, etc.) work, but pywin32 raises an
+        # AttributeError while resolving DoJavaScript.  Reconnect only for that
+        # pre-invocation failure; retrying arbitrary COM/JSX errors could execute
+        # a partially completed merge twice.
+        javascript_method = None
+        last_method_error = None
+        for attempt in range(1, 5):
+            try:
+                javascript_method = getattr(app, "DoJavaScript")
+                break
+            except AttributeError as method_error:
+                last_method_error = method_error
+                if attempt == 4:
+                    break
+                print(
+                    f"⚠️ DEBUG: Illustrator scripting is not ready "
+                    f"(attempt {attempt}/4); reconnecting..."
+                )
+                app = None
+                time.sleep(0.75 * attempt)
+                app = win32com.client.Dispatch("Illustrator.Application")
+
+        if javascript_method is None:
+            raise RuntimeError(
+                "Illustrator connected, but DoJavaScript was unavailable after "
+                "4 attempts. Restart Illustrator or repair its COM registration."
+            ) from last_method_error
+
+        javascript_method(jsx_content)
         print(f"🔍 DEBUG: JavaScript executed")
         print(f"🔍 DEBUG: Number of open documents: {app.Documents.Count}")
         if app.Documents.Count > 0:
