@@ -1131,6 +1131,63 @@ main();
 # ========================================================
 # 2. פונקציות ניהול (Python)
 # ========================================================
+def remove_existing_output(path, attempts=4):
+    """Remove an old/partial output, including files briefly locked by sync tools."""
+    if not os.path.exists(path):
+        return
+
+    last_error = None
+    for attempt in range(1, attempts + 1):
+        try:
+            os.remove(path)
+            if not os.path.exists(path):
+                return
+        except OSError as exc:
+            last_error = exc
+        if attempt < attempts:
+            time.sleep(0.4 * attempt)
+
+    raise RuntimeError(
+        f"Cannot replace existing output file (it may be open or locked): {path}"
+    ) from last_error
+
+
+def save_print_pdf_with_retry(doc, output_path, attempts=3):
+    """Save a print PDF and recover from Illustrator's transient CONF failure."""
+    last_error = None
+    for attempt in range(1, attempts + 1):
+        remove_existing_output(output_path)
+        try:
+            pdf_opts = win32com.client.Dispatch("Illustrator.PDFSaveOptions")
+            pdf_opts.PDFPreset = "[Press Quality]"
+            doc.SaveAs(output_path, pdf_opts)
+            if not os.path.isfile(output_path) or os.path.getsize(output_path) == 0:
+                raise RuntimeError("Illustrator returned without creating a valid PDF")
+            return
+        except Exception as exc:
+            last_error = exc
+            # A failed SaveAs can leave a partial PDF.  Leaving it in place makes
+            # the next COM SaveAs request overwrite confirmation (error CONF).
+            try:
+                remove_existing_output(output_path)
+            except Exception as cleanup_error:
+                raise RuntimeError(
+                    f"PDF save failed and its partial output could not be removed: "
+                    f"{output_path}: {cleanup_error}"
+                ) from exc
+            if attempt < attempts:
+                print(
+                    f"   > PDF save failed (attempt {attempt}/{attempts}); "
+                    f"cleaning partial output and retrying: {exc}"
+                )
+                time.sleep(0.75 * attempt)
+
+    raise RuntimeError(
+        f"Illustrator could not save {os.path.basename(output_path)} after "
+        f"{attempts} attempts: {last_error}"
+    ) from last_error
+
+
 def run_illustrator_split(source_file_path, order_number, output_folder, order_payload_path=None):
     """מבצע פיצול חכם לפי מוצרים (1, 2...) ולפי שכבות הדפסה"""
     files_created = []
@@ -1269,7 +1326,9 @@ def run_illustrator_split(source_file_path, order_number, output_folder, order_p
             print(f"   [דיבוג] לא הועבר נתיב payload – זיהוי אוטומטי")
     # --- שלב 2: ביצוע המשימות ---
     last_4 = str(order_number)[-4:]
+    failed_jobs = []
     for job in job_list:
+        work_doc = None
         print(f">> Processing Product {job['prod_idx']}: {job['layer_name']} ({job['suffix']})")
         base_name = f"{last_4}_{job['suffix']}"
         if job['prod_idx'] != "1":
@@ -1281,9 +1340,7 @@ def run_illustrator_split(source_file_path, order_number, output_folder, order_p
         final_pdf_name = f"{base_name}.pdf"
         final_pdf_path = os.path.join(output_folder, final_pdf_name)
         # === שינוי לדריסה: מחיקת קובץ קיים במקום יצירת עותק ===
-        if os.path.exists(final_pdf_path):
-            try: os.remove(final_pdf_path)
-            except: pass
+        remove_existing_output(final_pdf_path)
         # ======================================================
         temp_ai = os.path.join(output_folder, "temp_work.ai")
         shutil.copyfile(source_file_path, temp_ai)
@@ -1355,10 +1412,7 @@ def run_illustrator_split(source_file_path, order_number, output_folder, order_p
                     print(f"   > A4 לרוחב (2Pocket) הוחל")
                 except Exception as e:
                     print(f"   > אזהרה: שינוי A4 לרוחב נכשל: {e}")
-            pdf_opts = win32com.client.Dispatch("Illustrator.PDFSaveOptions")
-            pdf_opts = win32com.client.Dispatch("Illustrator.PDFSaveOptions")
-            pdf_opts.PDFPreset = "[Press Quality]"
-            work_doc.SaveAs(final_pdf_path, pdf_opts)
+            save_print_pdf_with_retry(work_doc, final_pdf_path)
             work_doc.Close(2)
             files_created.append({
                 "path": final_pdf_path,
@@ -1368,11 +1422,18 @@ def run_illustrator_split(source_file_path, order_number, output_folder, order_p
             print(f"   > Created: {final_pdf_name}")
         except Exception as e:
             print(f"Error processing job: {e}")
-            try: work_doc.Close(2)
+            failed_jobs.append(f"{job['prod_idx']}:{job['suffix']} ({e})")
+            try:
+                if work_doc is not None:
+                    work_doc.Close(2)
             except: pass
         if os.path.exists(temp_ai):
             try: os.remove(temp_ai)
             except: pass
+    if failed_jobs:
+        raise RuntimeError(
+            "One or more print files failed: " + "; ".join(failed_jobs)
+        )
     return files_created
 def run_photoshop_processing(files_list, default_contract_px, thickness_map=None):
     pythoncom.CoInitialize()
