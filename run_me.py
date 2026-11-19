@@ -19,7 +19,6 @@ FILES_TO_UPDATE = {
     "sidebar_numorder_logic.jsx": "https://raw.githubusercontent.com/Paintzart/Auto_Print_System/refs/heads/main/sidebar_numorder_logic.jsx",
     "variable_print.py": "https://raw.githubusercontent.com/Paintzart/Auto_Print_System/refs/heads/main/variable_print.py",
     "illustrator_ops.py": "https://raw.githubusercontent.com/Paintzart/Auto_Print_System/refs/heads/main/illustrator_ops.py",
-    "run_merge_batch.jsx": "https://raw.githubusercontent.com/Paintzart/Auto_Print_System/refs/heads/main/run_merge_batch.jsx",
     "config.example.json": "https://raw.githubusercontent.com/Paintzart/Auto_Print_System/refs/heads/main/config.example.json",
 }
 def update_files():
