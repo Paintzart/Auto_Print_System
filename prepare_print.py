@@ -1104,12 +1104,30 @@ function main() {
         var saved = false;
         // Production output is valid only with the required Press Quality preset.
         // Never silently downgrade to High Quality Print or default PDF settings.
-        var opts1 = new PDFSaveOptions();
-        opts1.presetFile = "[Press Quality]";
-        doc.saveAs(saveFile, opts1, true); saved = true;
+        var lastSaveError = "unknown error";
+        for (var saveAttempt = 1; saveAttempt <= 3 && !saved; saveAttempt++) {
+            try {
+                if (saveFile.exists) saveFile.remove();
+                var opts1 = new PDFSaveOptions();
+                opts1.presetFile = "[Press Quality]";
+                doc.saveAs(saveFile, opts1, true); saved = true;
+            } catch(saveError) {
+                lastSaveError = saveError.message;
+                try { if (saveFile.exists) saveFile.remove(); } catch(_) {}
+                if (saveAttempt < 3) $.sleep(750 * saveAttempt);
+            }
+        }
+        if (!saved) {
+            doc.close(SaveOptions.DONOTSAVECHANGES);
+            writeStatus("ERROR_PRESS_QUALITY_SAVE_AFTER_3_ATTEMPTS: " + lastSaveError);
+            return;
+        }
         doc.close(SaveOptions.DONOTSAVECHANGES);
         if (saved) { writeStatus("SUCCESS"); }
-    } catch(e) { writeStatus("ERROR: " + e.message); }
+    } catch(e) {
+        try { if (doc) doc.close(SaveOptions.DONOTSAVECHANGES); } catch(_) {}
+        writeStatus("ERROR: " + e.message);
+    }
 }
 function writeStatus(msg) {
     var f = new File(STATUS_PATH);
@@ -1499,11 +1517,19 @@ def run_photoshop_processing(files_list, default_contract_px, thickness_map=None
         # וידוא שהנתיב תקין עבור ווינדוס
         abs_path = os.path.abspath(file_path).replace("\\", "/")
         status_path = abs_path + ".status.txt"
+        photoshop_output_path = abs_path + ".photoshop-temp.pdf"
+        for stale_path in (status_path, photoshop_output_path):
+            if os.path.exists(stale_path):
+                try:
+                    os.remove(stale_path)
+                except OSError:
+                    pass
         # עדכון ה-JSX עם נתיבים נקיים לחלוטין
         jsx_code = (
             JSX_PS_TEMPLATE
             .replace("FILE_PATH", json.dumps(abs_path))
-            .replace("SAVE_PATH", json.dumps(abs_path))
+            # Photoshop must not overwrite the PDF that it currently has open.
+            .replace("SAVE_PATH", json.dumps(photoshop_output_path))
             .replace("STATUS_PATH", json.dumps(status_path))
             .replace("CONTRACT_PX", str(contract_px))
         )
@@ -1512,22 +1538,38 @@ def run_photoshop_processing(files_list, default_contract_px, thickness_map=None
             f.write(jsx_code)
         px_label = f" ({contract_px}px)" if thickness_map else ""
         print(f"Sending to Photoshop: {os.path.basename(file_path)}{px_label}")
-        ps.DoJavaScript(f'$.evalFile("{jsx_file.replace(os.sep, "/")}")')
+        try:
+            ps.DoJavaScript(f'$.evalFile("{jsx_file.replace(os.sep, "/")}")')
+        except Exception as photoshop_error:
+            print(f"❌ Photoshop script error: {photoshop_error}")
         # המתנה לסיום (הגדלתי את זמן ההמתנה ל-30 שניות)
         success = False
+        status_result = "TIMEOUT: Photoshop did not create a status file"
         for _ in range(300):
             if os.path.exists(status_path):
                 try:
-                    with open(status_path, "r") as f:
-                        if "SUCCESS" in f.read(): success = True
+                    with open(status_path, "r", encoding="utf-8") as f:
+                        status_result = f.read().strip()
+                        success = status_result.startswith("SUCCESS")
                     os.remove(status_path)
-                except: pass
+                except Exception as status_error:
+                    status_result = f"Could not read Photoshop status: {status_error}"
                 break
             time.sleep(0.1)
-        if success:
+        if success and os.path.isfile(photoshop_output_path) and os.path.getsize(photoshop_output_path) > 0:
+            os.replace(photoshop_output_path, abs_path)
             print(f"✅ Photoshop Saved: {os.path.basename(file_path)}")
         else:
-            print(f"❌ Photoshop Failed to save: {os.path.basename(file_path)}")
+            success = False
+            print(
+                f"❌ Photoshop Failed to save: {os.path.basename(file_path)}; "
+                f"details: {status_result}"
+            )
+            if os.path.exists(photoshop_output_path):
+                try:
+                    os.remove(photoshop_output_path)
+                except OSError:
+                    pass
         if os.path.exists(jsx_file): os.remove(jsx_file)
 # ========================================================
 def create_simulation_summary_file(source_file_path, order_number, output_folder):
