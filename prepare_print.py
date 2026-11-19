@@ -109,8 +109,8 @@ function applyNumOrderSidebar(doc, mode, targetArtboardIndex) {
         return false;
     }
 
-    var f = new File(SIDEBAR_NUMORDER_SCRIPT);
-    if (!f.exists) throw new Error("NumOrder script missing: " + SIDEBAR_NUMORDER_SCRIPT);
+    var sidebarNumOrderSource = SIDEBAR_NUMORDER_SOURCE;
+    if (!sidebarNumOrderSource) throw new Error("NumOrder script source is empty");
 
     for (var attempt = 1; attempt <= 2; attempt++) {
         var existing = findNumLayer(doc);
@@ -125,7 +125,7 @@ function applyNumOrderSidebar(doc, mode, targetArtboardIndex) {
         $.global.numOrderTargetArtboardIndex = targetIndex;
         $.global.showNumOrderSidebar = true;
         $.writeln("Applying NumOrder sidebar, attempt " + attempt + "...");
-        $.evalFile(f);
+        eval(sidebarNumOrderSource);
         if (layerAppearsOnTarget(findNumLayer(doc))) return true;
     }
     throw new Error(
@@ -1665,6 +1665,13 @@ def create_simulation_summary_file(source_file_path, order_number, output_folder
     # Sidebar_NumOrder — מתיקיית Simulations ליד הקוד (כמו שאר ההדמיות)
     sidebar_numorder_path = os.path.join(BASE_DIR, "Simulations", "Sidebar_NumOrder.ai").replace("\\", "/")
     sidebar_numorder_script = os.path.join(BASE_DIR, "sidebar_numorder_logic.jsx").replace("\\", "/")
+    sidebar_numorder_source_js = "null"
+    try:
+        with open(sidebar_numorder_script, "r", encoding="utf-8-sig") as sidebar_file:
+            sidebar_numorder_source = sidebar_file.read().replace("#target illustrator", "", 1)
+        sidebar_numorder_source_js = json.dumps(sidebar_numorder_source, ensure_ascii=True)
+    except Exception as sidebar_source_error:
+        print(f"   ⚠ Could not load NumOrder script: {sidebar_source_error}")
     try:
         qr_paths = create_order_qr_images(order_number)
         print(f"   > Created QR images for order {order_number}")
@@ -1699,6 +1706,7 @@ def create_simulation_summary_file(source_file_path, order_number, output_folder
             .replace("ORDER_LAST4", json.dumps(last_4))
             .replace("SIDEBAR_NUMORDER_SCRIPT", json.dumps(sidebar_numorder_script))
             .replace("SIDEBAR_NUMORDER_PATH", json.dumps(sidebar_numorder_path))
+            .replace("SIDEBAR_NUMORDER_SOURCE", sidebar_numorder_source_js)
         )
 
     # בדיקה אם יש רק מוצר 1
@@ -1731,21 +1739,31 @@ def create_simulation_summary_file(source_file_path, order_number, output_folder
             script_to_run = inject_numorder(JSX_CREATE_PRINT_FROM_SCRATCH)
             result = app.DoJavaScript(script_to_run)
             if "SUCCESS" in str(result):
-                print(f"   > Created Summary: {final_pdf_name}")
+                if os.path.isfile(final_pdf_path) and os.path.getsize(final_pdf_path) > 0:
+                    print(f"   > Created Summary: {final_pdf_name}")
+                else:
+                    raise RuntimeError("Illustrator reported success without creating the print PDF")
             else:
                 print(f"   > Error creating from scratch: {result}")
                 # נסיון עם הלוגיקה הרגילה
                 script_to_run = inject_numorder(JSX_CREATE_SIM_SUMMARY)
                 app.DoJavaScript(script_to_run)
-                print(f"   > Created Summary (fallback): {final_pdf_name}")
+                if os.path.isfile(final_pdf_path) and os.path.getsize(final_pdf_path) > 0:
+                    print(f"   > Created Summary (fallback): {final_pdf_name}")
+                else:
+                    raise RuntimeError("Fallback completed without creating the print PDF")
         else:
             # לוגיקה רגילה - עבור מספר מוצרים
             print(f"   > Adding NumOrder sidebar ({last_4})...")
             script_to_run = inject_numorder(JSX_CREATE_SIM_SUMMARY)
             app.DoJavaScript(script_to_run)
-            print(f"   > Created Summary: {final_pdf_name}")
+            if os.path.isfile(final_pdf_path) and os.path.getsize(final_pdf_path) > 0:
+                print(f"   > Created Summary: {final_pdf_name}")
+            else:
+                raise RuntimeError("Illustrator completed without creating the print PDF")
     except Exception as e:
         print(f"   Error creating summary: {e}")
+        raise RuntimeError(f"Could not create {final_pdf_name}: {e}") from e
     finally:
         remove_temporary_qr_images(qr_paths)
 # 3. נקודת כניסה ראשית
