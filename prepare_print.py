@@ -1150,12 +1150,13 @@ def save_print_pdf_with_retry(app, doc, output_path, attempts=3):
         available_presets = [p.strip() for p in str(preset_text).splitlines() if p.strip()]
         print(f"   > Illustrator PDF presets: {available_presets}")
         if "[Press Quality]" not in available_presets:
-            raise RuntimeError(
-                "Illustrator does not have the required [Press Quality] PDF preset. "
-                f"Available presets: {available_presets}"
+            # Some Illustrator builds expose only Illustrator Default through
+            # PDFPresetsList even though the full preset list is visible in the
+            # UI. Do not reject a valid UI preset before actually trying it.
+            print(
+                "   > Warning: [Press Quality] was not exposed by the scripting "
+                "preset list; attempting the required preset directly."
             )
-    except RuntimeError:
-        raise
     except Exception as preset_error:
         print(f"   > Could not read Illustrator PDF preset list: {preset_error}")
 
