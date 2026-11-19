@@ -75,13 +75,15 @@ def remove_temporary_qr_images(paths):
 # ========================================================
 # הוספת Sidebar_NumOrder (מספר הזמנה) לדף הראשון — כמו פרסומת
 JSX_APPLY_NUMORDER_HELPER = r'''
-function applyNumOrderSidebar(doc, mode) {
+function applyNumOrderSidebar(doc, mode, targetArtboardIndex) {
     try {
         if (!doc) return;
         $.global.targetMasterDoc = doc;
         $.global.numOrderLast4 = ORDER_LAST4;
         $.global.numOrderSidebarPath = SIDEBAR_NUMORDER_PATH;
         $.global.numOrderMode = mode || "side";
+        $.global.numOrderTargetArtboardIndex =
+            (typeof targetArtboardIndex === "number") ? targetArtboardIndex : 0;
         $.global.showNumOrderSidebar = true;
         var f = new File(SIDEBAR_NUMORDER_SCRIPT);
         if (f.exists) {
@@ -138,7 +140,7 @@ function createSimSummary() {
                 break;
             }
         }
-        applyNumOrderSidebar(sourceDoc, "side");
+        applyNumOrderSidebar(sourceDoc, "side", targetAbIdx);
         var opts = new PDFSaveOptions();
         opts.presetFile = "[Press Quality]";
         opts.artboardRange = (targetAbIdx + 1).toString();

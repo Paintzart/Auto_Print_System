@@ -395,7 +395,16 @@ function mainNumOrder() {
         return;
     }
 
-    var abRect = pdfDoc.artboards[0].artboardRect;
+    var targetAbIndex = 0;
+    if (typeof $.global.numOrderTargetArtboardIndex !== "undefined") {
+        var requestedIndex = Number($.global.numOrderTargetArtboardIndex);
+        if (!isNaN(requestedIndex) && requestedIndex >= 0 && requestedIndex < pdfDoc.artboards.length) {
+            targetAbIndex = Math.floor(requestedIndex);
+        }
+    }
+    try { pdfDoc.artboards.setActiveArtboardIndex(targetAbIndex); } catch (eTargetAb) {}
+    var abRect = pdfDoc.artboards[targetAbIndex].artboardRect;
+    $.writeln("NumOrder target artboard: " + (targetAbIndex + 1));
     try {
         $.writeln("--- Resize first page ---");
         if (mode === "bottom") {
