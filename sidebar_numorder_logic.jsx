@@ -385,7 +385,6 @@ function mainNumOrder() {
     if (typeof $.global.targetMasterDoc !== "undefined" && $.global.targetMasterDoc !== null) {
         pdfDoc = $.global.targetMasterDoc;
         pdfDoc.activate();
-        app.activeDocument = pdfDoc;
     } else {
         pdfDoc = app.activeDocument;
     }
@@ -469,7 +468,6 @@ function mainNumOrder() {
         $.writeln("Source relative pos: left=" + srcRelLeft + " top=" + srcRelTop);
 
         pdfDoc.activate();
-        app.activeDocument = pdfDoc;
 
         var sidebarFinalLayer;
         try {

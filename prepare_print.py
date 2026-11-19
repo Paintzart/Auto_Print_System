@@ -76,25 +76,62 @@ def remove_temporary_qr_images(paths):
 # הוספת Sidebar_NumOrder (מספר הזמנה) לדף הראשון — כמו פרסומת
 JSX_APPLY_NUMORDER_HELPER = r'''
 function applyNumOrderSidebar(doc, mode, targetArtboardIndex) {
-    try {
-        if (!doc) return;
+    if (!doc) throw new Error("Cannot add NumOrder: document is missing");
+    var targetIndex = (typeof targetArtboardIndex === "number") ? targetArtboardIndex : 0;
+    if (targetIndex < 0 || targetIndex >= doc.artboards.length) targetIndex = 0;
+    var targetRect = doc.artboards[targetIndex].artboardRect;
+
+    function intersectsTarget(item) {
+        try {
+            var b = item.visibleBounds;
+            return !(b[0] > targetRect[2] || b[2] < targetRect[0] ||
+                     b[1] < targetRect[3] || b[3] > targetRect[1]);
+        } catch (e) { return false; }
+    }
+    function findNumLayer(container) {
+        if (!container || !container.layers) return null;
+        for (var i = 0; i < container.layers.length; i++) {
+            var layer = container.layers[i];
+            if (layer.name === "Sidebar_NumOrder_Layer") return layer;
+            var nested = findNumLayer(layer);
+            if (nested) return nested;
+        }
+        return null;
+    }
+    function layerAppearsOnTarget(layer) {
+        if (!layer) return false;
+        for (var i = 0; i < layer.pageItems.length; i++) {
+            if (intersectsTarget(layer.pageItems[i])) return true;
+        }
+        for (var j = 0; j < layer.layers.length; j++) {
+            if (layerAppearsOnTarget(layer.layers[j])) return true;
+        }
+        return false;
+    }
+
+    var f = new File(SIDEBAR_NUMORDER_SCRIPT);
+    if (!f.exists) throw new Error("NumOrder script missing: " + SIDEBAR_NUMORDER_SCRIPT);
+
+    for (var attempt = 1; attempt <= 2; attempt++) {
+        var existing = findNumLayer(doc);
+        if (layerAppearsOnTarget(existing)) return true;
+        if (existing) {
+            try { existing.locked = false; existing.visible = true; existing.remove(); } catch (_) {}
+        }
         $.global.targetMasterDoc = doc;
         $.global.numOrderLast4 = ORDER_LAST4;
         $.global.numOrderSidebarPath = SIDEBAR_NUMORDER_PATH;
         $.global.numOrderMode = mode || "side";
-        $.global.numOrderTargetArtboardIndex =
-            (typeof targetArtboardIndex === "number") ? targetArtboardIndex : 0;
+        $.global.numOrderTargetArtboardIndex = targetIndex;
         $.global.showNumOrderSidebar = true;
-        var f = new File(SIDEBAR_NUMORDER_SCRIPT);
-        if (f.exists) {
-            $.writeln("Applying NumOrder sidebar (" + $.global.numOrderMode + ")...");
-            $.evalFile(f);
-        } else {
-            $.writeln("NumOrder script missing: " + SIDEBAR_NUMORDER_SCRIPT);
-        }
-    } catch (e) {
-        $.writeln("NumOrder sidebar skipped: " + e);
+        $.writeln("Applying NumOrder sidebar, attempt " + attempt + "...");
+        $.evalFile(f);
+        if (layerAppearsOnTarget(findNumLayer(doc))) return true;
     }
+    throw new Error(
+        "NumOrder verification failed: Sidebar_NumOrder_Layer is not on artboard " +
+        (targetIndex + 1)
+    );
 }
 '''
 # ========================================================
