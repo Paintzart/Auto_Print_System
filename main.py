@@ -1033,35 +1033,37 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
             os.makedirs(output_dir, exist_ok=True)
 
             print(f"💾 DEBUG: Saving PDF to: {final_path}")
-            try:
-                # The final production PDF must always use Press Quality and retain
-                # Illustrator editing data (layers, vectors, text, etc.). Large
-                # merged documents can make Illustrator return the opaque CONF
-                # error while embedding that data, so the same settings are retried
-                # after removing any incomplete output file.
-                pdf_options = win32com.client.Dispatch("Illustrator.PDFSaveOptions")
-                pdf_options.PDFPreset = "[Press Quality]"
-                pdf_options.PreserveEditability = True
-                doc.SaveAs(final_path, pdf_options)
-            except Exception as first_save_error:
-                print(
-                    "⚠️ DEBUG: Press Quality editable PDF save failed; "
-                    f"removing partial output and retrying: {first_save_error}"
-                )
-                # A failed SaveAs may leave an incomplete file which itself causes
-                # the next SaveAs to request confirmation (Illustrator error CONF).
+            last_save_error = None
+            for save_attempt in range(1, 4):
                 if os.path.exists(final_path):
                     try:
                         os.remove(final_path)
                     except OSError as cleanup_error:
                         raise RuntimeError(
                             f"Cannot replace incomplete PDF {final_path}: {cleanup_error}"
-                        ) from first_save_error
-
-                retry_pdf_options = win32com.client.Dispatch("Illustrator.PDFSaveOptions")
-                retry_pdf_options.PDFPreset = "[Press Quality]"
-                retry_pdf_options.PreserveEditability = True
-                doc.SaveAs(final_path, retry_pdf_options)
+                        ) from last_save_error
+                try:
+                    # Every attempt uses the required preset. There is deliberately
+                    # no fallback to High Quality Print or default PDF settings.
+                    pdf_options = win32com.client.Dispatch("Illustrator.PDFSaveOptions")
+                    pdf_options.PDFPreset = "[Press Quality]"
+                    pdf_options.PreserveEditability = True
+                    doc.SaveAs(final_path, pdf_options)
+                    if os.path.isfile(final_path) and os.path.getsize(final_path) > 0:
+                        break
+                    raise RuntimeError("Illustrator returned without creating a valid PDF")
+                except Exception as save_error:
+                    last_save_error = save_error
+                    if save_attempt == 3:
+                        raise RuntimeError(
+                            "Illustrator could not save the merged PDF with "
+                            f"[Press Quality] after 3 attempts: {save_error}"
+                        ) from save_error
+                    print(
+                        "⚠️ DEBUG: Press Quality PDF save failed "
+                        f"(attempt {save_attempt}/3); cleaning and retrying: {save_error}"
+                    )
+                    time.sleep(0.75 * save_attempt)
 
             if not os.path.isfile(final_path) or os.path.getsize(final_path) == 0:
                 raise RuntimeError(f"Illustrator reported success but PDF is missing or empty: {final_path}")

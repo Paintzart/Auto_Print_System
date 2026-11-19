@@ -6,10 +6,12 @@ import sys
 FILES_TO_UPDATE = {
     "run_me.py": "https://raw.githubusercontent.com/Paintzart/Auto_Print_System/refs/heads/main/run_me.py", # הוא מעדכן את עצמו!
     "Setup_System.bat": "https://raw.githubusercontent.com/Paintzart/Auto_Print_System/refs/heads/main/Setup_System.bat",
+    "run_auto.bat": "https://raw.githubusercontent.com/Paintzart/Auto_Print_System/refs/heads/main/run_auto.bat",
     "main.py": "https://raw.githubusercontent.com/Paintzart/Auto_Print_System/refs/heads/main/main.py",
     "vectorizer_ops.py": "https://raw.githubusercontent.com/Paintzart/Auto_Print_System/refs/heads/main/vectorizer_ops.py",
     "server.js": "https://raw.githubusercontent.com/Paintzart/Auto_Print_System/refs/heads/main/server.js",
     "prepare_print.py": "https://raw.githubusercontent.com/Paintzart/Auto_Print_System/refs/heads/main/prepare_print.py",
+    "photoshop_automation.py": "https://raw.githubusercontent.com/Paintzart/Auto_Print_System/refs/heads/main/photoshop_automation.py",
     "package.json": "https://raw.githubusercontent.com/Paintzart/Auto_Print_System/refs/heads/main/package.json",
     "package-lock.json": "https://raw.githubusercontent.com/Paintzart/Auto_Print_System/refs/heads/main/package-lock.json", # חדש!
     "requirements.txt": "https://raw.githubusercontent.com/Paintzart/Auto_Print_System/refs/heads/main/requirements.txt", # חדש!

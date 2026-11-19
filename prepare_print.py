@@ -1102,22 +1102,11 @@ function main() {
         doc.selection.deselect();
         var saveFile = new File(savePath);
         var saved = false;
-        // מנגנון שמירה חסין (3 ניסיונות)
-        try {
-            var opts1 = new PDFSaveOptions();
-            opts1.presetFile = "[Press Quality]";
-            doc.saveAs(saveFile, opts1, true); saved = true;
-        } catch(e) {
-            try {
-                var opts2 = new PDFSaveOptions();
-                opts2.presetFile = "[High Quality Print]";
-                doc.saveAs(saveFile, opts2, true); saved = true;
-            } catch(e2) {
-                var opts3 = new PDFSaveOptions();
-                opts3.spotColors = true;
-                doc.saveAs(saveFile, opts3, true); saved = true;
-            }
-        }
+        // Production output is valid only with the required Press Quality preset.
+        // Never silently downgrade to High Quality Print or default PDF settings.
+        var opts1 = new PDFSaveOptions();
+        opts1.presetFile = "[Press Quality]";
+        doc.saveAs(saveFile, opts1, true); saved = true;
         doc.close(SaveOptions.DONOTSAVECHANGES);
         if (saved) { writeStatus("SUCCESS"); }
     } catch(e) { writeStatus("ERROR: " + e.message); }

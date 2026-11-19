@@ -112,31 +112,30 @@ function main() {
         // ---------------------------------------------------
         var saveFile = new File(savePath);
         
-        try {
-            // נסיון ראשון: שמירה עם הגדרת "Press Quality"
-            var optsPress = new PDFSaveOptions();
-            optsPress.alphaChannels = true;
-            optsPress.spotColors = true;
-            optsPress.layers = true;
-            optsPress.presetFile = "[Press Quality]"; // השם הסטנדרטי לאיכות דפוס
-            
-            doc.saveAs(saveFile, optsPress, true, Extension.LOWERCASE);
-            writeStatus("SUCCESS_SAVED_PRESS");
-
-        } catch(e) {
-            // נסיון שני (גיבוי): אם השם של הפריסט לא עבד, שומרים רגיל
+        var saved = false;
+        var lastSaveError = "unknown error";
+        for (var saveAttempt = 1; saveAttempt <= 3 && !saved; saveAttempt++) {
             try {
-                var optsDefault = new PDFSaveOptions();
-                optsDefault.alphaChannels = true;
-                optsDefault.spotColors = true;
-                optsDefault.layers = true;
-                doc.saveAs(saveFile, optsDefault, true, Extension.LOWERCASE);
-                writeStatus("SUCCESS_SAVED_DEFAULT");
-            } catch(e2) {
-                writeStatus("ERROR_SAVE: " + e2.message);
-                return;
+                if (saveFile.exists) saveFile.remove();
+                var optsPress = new PDFSaveOptions();
+                optsPress.alphaChannels = true;
+                optsPress.spotColors = true;
+                optsPress.layers = true;
+                optsPress.presetFile = "[Press Quality]";
+                doc.saveAs(saveFile, optsPress, true, Extension.LOWERCASE);
+                saved = true;
+            } catch(e) {
+                lastSaveError = e.message;
+                try { if (saveFile.exists) saveFile.remove(); } catch(_) {}
+                if (saveAttempt < 3) $.sleep(750 * saveAttempt);
             }
         }
+        if (!saved) {
+            // Never create a lower-quality fallback PDF.
+            writeStatus("ERROR_PRESS_QUALITY_SAVE_AFTER_3_ATTEMPTS: " + lastSaveError);
+            return;
+        }
+        writeStatus("SUCCESS_SAVED_PRESS");
 
         doc.close(SaveOptions.DONOTSAVECHANGES);
 

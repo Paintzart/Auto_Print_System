@@ -3549,9 +3549,9 @@ def delete_print_layer_only(app, prefix: str):
 def save_pdf(doc, path: str):
     try:
         o = win32com.client.Dispatch("Illustrator.PDFSaveOptions")
+        o.PDFPreset = "[Press Quality]"
         o.PreserveEditability = True
         doc.SaveAs(path, o)
-    except: pass
     finally:
         try: doc.Close(2)
         except: pass
