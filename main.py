@@ -756,6 +756,7 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
     jsx_content = f"""
     #target illustrator
     var files = {json.dumps(js_files)};
+    var mergeStage = "startup";
     function fileLooksLikePdf(f) {{
         try {{
             if (!f.open("r")) return false;
@@ -792,6 +793,7 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
         app.userInteractionLevel = UserInteractionLevel.DONTDISPLAYALERTS;
         var maxWidth = 0; var maxHeight = 0;
         for (var i = 0; i < files.length; i++) {{
+            mergeStage = "measuring input " + (i + 1);
             var tempDoc = openFileSafe(files[i]);
             var m = calculateLayoutMetrics(tempDoc);
             if (m.width > maxWidth) maxWidth = m.width;
@@ -804,9 +806,12 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
         var STEP_Y = maxHeight + GAP_Y;
         var COLS = {int(VARIABLE_PRINT_COLS)};
         $.writeln("Merge grid: " + files.length + " products, STEP_X=" + STEP_X + " STEP_Y=" + STEP_Y + " COLS=" + COLS);
+        mergeStage = "opening master document";
         var masterDoc = openFileSafe(files[0]);
+        mergeStage = "organizing master document";
         organizeMasterContent(masterDoc);
         for (var j = 1; j < files.length; j++) {{
+            mergeStage = "merging input " + (j + 1);
             var col = j % COLS;
             var row = Math.floor(j / COLS);
             processNextFileFast(masterDoc, files[j], (j+1).toString(), col * STEP_X, -(row * STEP_Y));
@@ -831,12 +836,12 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
         $.writeln("sidebar source loaded: " + (sidebarSource !== null));
         $.writeln("masterDoc name: " + masterDoc.name);
         if (showSidebar && !sidebarAlreadyApplied && !docHasSidebarLayer(masterDoc) && sidebarSource !== null) {{
+            mergeStage = "adding simulation sidebar";
             $.writeln("--- Calling sidebar_logic.jsx ---");
             // העברת masterDoc כמשתנה גלובלי ל-sidebar_logic.jsx
             var targetDoc = masterDoc;
             $.writeln("Activating targetDoc: " + targetDoc.name);
             targetDoc.activate();
-            app.activeDocument = targetDoc;
             $.writeln("Active document after activation: " + app.activeDocument.name);
             // הגדרת משתנה גלובלי ש-sidebar_logic.jsx יוכל להשתמש בו
             $.global.targetMasterDoc = targetDoc;
@@ -848,7 +853,6 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
             // וידוא ש-masterDoc נשאר פעיל אחרי הוספת התפריט הצד
             $.writeln("Reactivating targetDoc after sidebar logic...");
             targetDoc.activate();
-            app.activeDocument = targetDoc;
             $.writeln("Final active document: " + app.activeDocument.name);
             $.writeln("Document layers count: " + targetDoc.layers.length);
             $.writeln("Document artboards count: " + targetDoc.artboards.length);
@@ -856,7 +860,9 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
         }} else {{
             $.writeln("Sidebar skipped (showSidebar=" + showSidebar + ", alreadyApplied=" + sidebarAlreadyApplied + ", hasLayer=" + docHasSidebarLayer(masterDoc) + ", sourceLoaded=" + (sidebarSource !== null) + ")");
         }}
+        mergeStage = "reordering artboards";
         reorderArtboardsSafe(masterDoc);
+        mergeStage = "complete";
     }}
     // --- שאר הפונקציות (calculateLayoutMetrics, organizeMasterContent וכו') נשארות ללא שינוי ---
     function calculateLayoutMetrics(doc) {{
@@ -934,7 +940,14 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
         var len = oldAbs.length;
         for (var k = 0; k < len; k++) doc.artboards[0].remove();
     }}
-    main();
+    try {{
+        main();
+    }} catch (mergeError) {{
+        throw new Error(
+            "Merge failed during " + mergeStage + ": " + mergeError.message +
+            (mergeError.line ? " (line " + mergeError.line + ")" : "")
+        );
+    }}
     """
     try:
         print(f"\n🔍 DEBUG: About to run merge script...")
