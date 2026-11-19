@@ -117,12 +117,11 @@ function main() {
         for (var saveAttempt = 1; saveAttempt <= 3 && !saved; saveAttempt++) {
             try {
                 if (saveFile.exists) saveFile.remove();
-                var optsPress = new PDFSaveOptions();
-                optsPress.alphaChannels = true;
-                optsPress.spotColors = true;
-                optsPress.layers = true;
-                optsPress.presetFile = "[Press Quality]";
-                doc.saveAs(saveFile, optsPress, true, Extension.LOWERCASE);
+                var optsDtf = new PDFSaveOptions();
+                optsDtf.alphaChannels = true;
+                optsDtf.spotColors = true;
+                optsDtf.layers = true;
+                doc.saveAs(saveFile, optsDtf, true, Extension.LOWERCASE);
                 saved = true;
             } catch(e) {
                 lastSaveError = e.message;
@@ -131,11 +130,11 @@ function main() {
             }
         }
         if (!saved) {
-            // Never create a lower-quality fallback PDF.
-            writeStatus("ERROR_PRESS_QUALITY_SAVE_AFTER_3_ATTEMPTS: " + lastSaveError);
+            // DTF output must preserve its spot channel.
+            writeStatus("ERROR_DTF_PDF_SAVE_AFTER_3_ATTEMPTS: " + lastSaveError);
             return;
         }
-        writeStatus("SUCCESS_SAVED_PRESS");
+        writeStatus("SUCCESS_SAVED_DTF_SPOT");
 
         doc.close(SaveOptions.DONOTSAVECHANGES);
 
