@@ -385,6 +385,7 @@ function mainNumOrder() {
     if (typeof $.global.targetMasterDoc !== "undefined" && $.global.targetMasterDoc !== null) {
         pdfDoc = $.global.targetMasterDoc;
         pdfDoc.activate();
+        app.activeDocument = pdfDoc;
     } else {
         pdfDoc = app.activeDocument;
     }
@@ -394,16 +395,7 @@ function mainNumOrder() {
         return;
     }
 
-    var targetAbIndex = 0;
-    if (typeof $.global.numOrderTargetArtboardIndex !== "undefined") {
-        var requestedIndex = Number($.global.numOrderTargetArtboardIndex);
-        if (!isNaN(requestedIndex) && requestedIndex >= 0 && requestedIndex < pdfDoc.artboards.length) {
-            targetAbIndex = Math.floor(requestedIndex);
-        }
-    }
-    try { pdfDoc.artboards.setActiveArtboardIndex(targetAbIndex); } catch (eTargetAb) {}
-    var abRect = pdfDoc.artboards[targetAbIndex].artboardRect;
-    $.writeln("NumOrder target artboard: " + (targetAbIndex + 1));
+    var abRect = pdfDoc.artboards[0].artboardRect;
     try {
         $.writeln("--- Resize first page ---");
         if (mode === "bottom") {
@@ -468,6 +460,7 @@ function mainNumOrder() {
         $.writeln("Source relative pos: left=" + srcRelLeft + " top=" + srcRelTop);
 
         pdfDoc.activate();
+        app.activeDocument = pdfDoc;
 
         var sidebarFinalLayer;
         try {

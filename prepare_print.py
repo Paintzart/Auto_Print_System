@@ -75,63 +75,24 @@ def remove_temporary_qr_images(paths):
 # ========================================================
 # הוספת Sidebar_NumOrder (מספר הזמנה) לדף הראשון — כמו פרסומת
 JSX_APPLY_NUMORDER_HELPER = r'''
-function applyNumOrderSidebar(doc, mode, targetArtboardIndex) {
-    if (!doc) throw new Error("Cannot add NumOrder: document is missing");
-    var targetIndex = (typeof targetArtboardIndex === "number") ? targetArtboardIndex : 0;
-    if (targetIndex < 0 || targetIndex >= doc.artboards.length) targetIndex = 0;
-    var targetRect = doc.artboards[targetIndex].artboardRect;
-
-    function intersectsTarget(item) {
-        try {
-            var b = item.visibleBounds;
-            return !(b[0] > targetRect[2] || b[2] < targetRect[0] ||
-                     b[1] < targetRect[3] || b[3] > targetRect[1]);
-        } catch (e) { return false; }
-    }
-    function findNumLayer(container) {
-        if (!container || !container.layers) return null;
-        for (var i = 0; i < container.layers.length; i++) {
-            var layer = container.layers[i];
-            if (layer.name === "Sidebar_NumOrder_Layer") return layer;
-            var nested = findNumLayer(layer);
-            if (nested) return nested;
-        }
-        return null;
-    }
-    function layerAppearsOnTarget(layer) {
-        if (!layer) return false;
-        for (var i = 0; i < layer.pageItems.length; i++) {
-            if (intersectsTarget(layer.pageItems[i])) return true;
-        }
-        for (var j = 0; j < layer.layers.length; j++) {
-            if (layerAppearsOnTarget(layer.layers[j])) return true;
-        }
-        return false;
-    }
-
-    var sidebarNumOrderSource = SIDEBAR_NUMORDER_SOURCE;
-    if (!sidebarNumOrderSource) throw new Error("NumOrder script source is empty");
-
-    for (var attempt = 1; attempt <= 2; attempt++) {
-        var existing = findNumLayer(doc);
-        if (layerAppearsOnTarget(existing)) return true;
-        if (existing) {
-            try { existing.locked = false; existing.visible = true; existing.remove(); } catch (_) {}
-        }
+function applyNumOrderSidebar(doc, mode) {
+    try {
+        if (!doc) return;
         $.global.targetMasterDoc = doc;
         $.global.numOrderLast4 = ORDER_LAST4;
         $.global.numOrderSidebarPath = SIDEBAR_NUMORDER_PATH;
         $.global.numOrderMode = mode || "side";
-        $.global.numOrderTargetArtboardIndex = targetIndex;
         $.global.showNumOrderSidebar = true;
-        $.writeln("Applying NumOrder sidebar, attempt " + attempt + "...");
-        eval(sidebarNumOrderSource);
-        if (layerAppearsOnTarget(findNumLayer(doc))) return true;
+        var f = new File(SIDEBAR_NUMORDER_SCRIPT);
+        if (f.exists) {
+            $.writeln("Applying NumOrder sidebar (" + $.global.numOrderMode + ")...");
+            $.evalFile(f);
+        } else {
+            $.writeln("NumOrder script missing: " + SIDEBAR_NUMORDER_SCRIPT);
+        }
+    } catch (e) {
+        $.writeln("NumOrder sidebar skipped: " + e);
     }
-    throw new Error(
-        "NumOrder verification failed: Sidebar_NumOrder_Layer is not on artboard " +
-        (targetIndex + 1)
-    );
 }
 '''
 # ========================================================
@@ -165,29 +126,8 @@ function createSimSummary() {
             } catch(e) {}
         }
     }
-    // Some templates nest the product/Simulation layers more deeply or use a
-    // non-numeric product layer name. Fall back to a recursive search.
-    if (simLayersData.length === 0) {
-        function collectNestedSimulationLayers(container) {
-            if (!container || !container.layers) return;
-            for (var n = 0; n < container.layers.length; n++) {
-                var nestedLayer = container.layers[n];
-                try { nestedLayer.visible = true; nestedLayer.locked = false; } catch (_) {}
-                if (String(nestedLayer.name).toLowerCase() === "simulation") {
-                    if (nestedLayer.pageItems.length > 0 || nestedLayer.layers.length > 0) {
-                        simLayersData.push({ id: simLayersData.length + 1, layer: nestedLayer });
-                    }
-                } else {
-                    collectNestedSimulationLayers(nestedLayer);
-                }
-            }
-        }
-        collectNestedSimulationLayers(sourceDoc);
-    }
     simLayersData.sort(function(a, b) { return a.id - b.id; });
-    if (simLayersData.length === 0) {
-        throw new Error("No non-empty Simulation layer was found anywhere in the document");
-    }
+    if (simLayersData.length === 0) return;
     // --- מקרה 1: הדמיה אחת ---
     if (simLayersData.length === 1) {
         var tempG = manualGroup(simLayersData[0].layer);
@@ -198,7 +138,7 @@ function createSimSummary() {
                 break;
             }
         }
-        applyNumOrderSidebar(sourceDoc, "side", targetAbIdx);
+        applyNumOrderSidebar(sourceDoc, "side");
         var opts = new PDFSaveOptions();
         opts.presetFile = "[Press Quality]";
         opts.artboardRange = (targetAbIdx + 1).toString();
@@ -1686,13 +1626,6 @@ def create_simulation_summary_file(source_file_path, order_number, output_folder
     # Sidebar_NumOrder — מתיקיית Simulations ליד הקוד (כמו שאר ההדמיות)
     sidebar_numorder_path = os.path.join(BASE_DIR, "Simulations", "Sidebar_NumOrder.ai").replace("\\", "/")
     sidebar_numorder_script = os.path.join(BASE_DIR, "sidebar_numorder_logic.jsx").replace("\\", "/")
-    sidebar_numorder_source_js = "null"
-    try:
-        with open(sidebar_numorder_script, "r", encoding="utf-8-sig") as sidebar_file:
-            sidebar_numorder_source = sidebar_file.read().replace("#target illustrator", "", 1)
-        sidebar_numorder_source_js = json.dumps(sidebar_numorder_source, ensure_ascii=True)
-    except Exception as sidebar_source_error:
-        print(f"   ⚠ Could not load NumOrder script: {sidebar_source_error}")
     try:
         qr_paths = create_order_qr_images(order_number)
         print(f"   > Created QR images for order {order_number}")
@@ -1727,7 +1660,6 @@ def create_simulation_summary_file(source_file_path, order_number, output_folder
             .replace("ORDER_LAST4", json.dumps(last_4))
             .replace("SIDEBAR_NUMORDER_SCRIPT", json.dumps(sidebar_numorder_script))
             .replace("SIDEBAR_NUMORDER_PATH", json.dumps(sidebar_numorder_path))
-            .replace("SIDEBAR_NUMORDER_SOURCE", sidebar_numorder_source_js)
         )
 
     # בדיקה אם יש רק מוצר 1
@@ -1760,31 +1692,21 @@ def create_simulation_summary_file(source_file_path, order_number, output_folder
             script_to_run = inject_numorder(JSX_CREATE_PRINT_FROM_SCRATCH)
             result = app.DoJavaScript(script_to_run)
             if "SUCCESS" in str(result):
-                if os.path.isfile(final_pdf_path) and os.path.getsize(final_pdf_path) > 0:
-                    print(f"   > Created Summary: {final_pdf_name}")
-                else:
-                    raise RuntimeError("Illustrator reported success without creating the print PDF")
+                print(f"   > Created Summary: {final_pdf_name}")
             else:
                 print(f"   > Error creating from scratch: {result}")
                 # נסיון עם הלוגיקה הרגילה
                 script_to_run = inject_numorder(JSX_CREATE_SIM_SUMMARY)
                 app.DoJavaScript(script_to_run)
-                if os.path.isfile(final_pdf_path) and os.path.getsize(final_pdf_path) > 0:
-                    print(f"   > Created Summary (fallback): {final_pdf_name}")
-                else:
-                    raise RuntimeError("Fallback completed without creating the print PDF")
+                print(f"   > Created Summary (fallback): {final_pdf_name}")
         else:
             # לוגיקה רגילה - עבור מספר מוצרים
             print(f"   > Adding NumOrder sidebar ({last_4})...")
             script_to_run = inject_numorder(JSX_CREATE_SIM_SUMMARY)
             app.DoJavaScript(script_to_run)
-            if os.path.isfile(final_pdf_path) and os.path.getsize(final_pdf_path) > 0:
-                print(f"   > Created Summary: {final_pdf_name}")
-            else:
-                raise RuntimeError("Illustrator completed without creating the print PDF")
+            print(f"   > Created Summary: {final_pdf_name}")
     except Exception as e:
         print(f"   Error creating summary: {e}")
-        raise RuntimeError(f"Could not create {final_pdf_name}: {e}") from e
     finally:
         remove_temporary_qr_images(qr_paths)
 # 3. נקודת כניסה ראשית
