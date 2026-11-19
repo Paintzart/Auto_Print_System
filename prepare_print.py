@@ -165,8 +165,29 @@ function createSimSummary() {
             } catch(e) {}
         }
     }
+    // Some templates nest the product/Simulation layers more deeply or use a
+    // non-numeric product layer name. Fall back to a recursive search.
+    if (simLayersData.length === 0) {
+        function collectNestedSimulationLayers(container) {
+            if (!container || !container.layers) return;
+            for (var n = 0; n < container.layers.length; n++) {
+                var nestedLayer = container.layers[n];
+                try { nestedLayer.visible = true; nestedLayer.locked = false; } catch (_) {}
+                if (String(nestedLayer.name).toLowerCase() === "simulation") {
+                    if (nestedLayer.pageItems.length > 0 || nestedLayer.layers.length > 0) {
+                        simLayersData.push({ id: simLayersData.length + 1, layer: nestedLayer });
+                    }
+                } else {
+                    collectNestedSimulationLayers(nestedLayer);
+                }
+            }
+        }
+        collectNestedSimulationLayers(sourceDoc);
+    }
     simLayersData.sort(function(a, b) { return a.id - b.id; });
-    if (simLayersData.length === 0) return;
+    if (simLayersData.length === 0) {
+        throw new Error("No non-empty Simulation layer was found anywhere in the document");
+    }
     // --- מקרה 1: הדמיה אחת ---
     if (simLayersData.length === 1) {
         var tempG = manualGroup(simLayersData[0].layer);
