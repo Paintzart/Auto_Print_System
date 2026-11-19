@@ -172,7 +172,6 @@ function main() {
         pdfDoc = $.global.targetMasterDoc;
         $.writeln("Using targetMasterDoc from global: " + pdfDoc.name);
         pdfDoc.activate();
-        app.activeDocument = pdfDoc;
     } else {
         // אם לא הועבר, נשתמש במסמך הפעיל
         pdfDoc = app.activeDocument;
@@ -268,7 +267,6 @@ function main() {
         $.writeln("--- Step 13: Preparing to copy sidebar directly ---");
         // וידוא שהמסמך הראשי פעיל לפני העתקה
         pdfDoc.activate();
-        app.activeDocument = pdfDoc;
         $.writeln("Main document activated: " + pdfDoc.name);
         app.redraw();
         
@@ -298,7 +296,6 @@ function main() {
         
         // וידוא שהמסמך הראשי עדיין פעיל
         pdfDoc.activate();
-        app.activeDocument = pdfDoc;
         app.redraw();
         $.writeln("Main document still active: " + app.activeDocument.name);
         $.writeln("--- Step 19: Positioning sidebar ---");
@@ -359,7 +356,6 @@ function main() {
         $.writeln("--- Step 24: Final activation of main document ---");
         // וידוא שהמסמך הראשי עדיין פעיל ומוכן לשמירה
         pdfDoc.activate();
-        app.activeDocument = pdfDoc;
         app.redraw();
         $.writeln("=== SIDEBAR LOGIC COMPLETE ===");
         $.writeln("Sidebar successfully added to document: " + pdfDoc.name);
@@ -377,7 +373,6 @@ function main() {
             if (typeof $.global.targetMasterDoc !== 'undefined' && $.global.targetMasterDoc !== null) {
                 $.writeln("Attempting to reactivate targetMasterDoc...");
                 $.global.targetMasterDoc.activate();
-                app.activeDocument = $.global.targetMasterDoc;
                 $.writeln("Target document reactivated: " + $.global.targetMasterDoc.name);
             } else {
                 $.writeln("No targetMasterDoc available to reactivate");
