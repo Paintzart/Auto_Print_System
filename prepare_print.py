@@ -1159,6 +1159,36 @@ def remove_existing_output(path, attempts=4):
     ) from last_error
 
 
+def close_matching_adobe_documents(path, illustrator_app=None):
+    """Close only the generated PDF matching path if Adobe still holds it open."""
+    target = os.path.normcase(os.path.abspath(path))
+
+    def close_matches(app, app_name):
+        if app is None:
+            return
+        try:
+            documents = app.Documents
+            for index in range(documents.Count, 0, -1):
+                try:
+                    document = documents.Item(index)
+                    full_name = os.path.normcase(os.path.abspath(str(document.FullName)))
+                    if full_name == target:
+                        document.Close(2)
+                        print(f"   > Closed locked output in {app_name}: {path}")
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+    close_matches(illustrator_app, "Illustrator")
+    try:
+        photoshop_app = win32com.client.GetActiveObject("Photoshop.Application")
+    except Exception:
+        photoshop_app = None
+    close_matches(photoshop_app, "Photoshop")
+    time.sleep(0.5)
+
+
 def save_print_pdf_with_retry(app, doc, output_path, attempts=3):
     """Save through Illustrator's own JavaScript engine using Press Quality."""
     try:
@@ -1379,6 +1409,7 @@ def run_illustrator_split(source_file_path, order_number, output_folder, order_p
         final_pdf_name = f"{base_name}.pdf"
         final_pdf_path = os.path.join(output_folder, final_pdf_name)
         # === שינוי לדריסה: מחיקת קובץ קיים במקום יצירת עותק ===
+        close_matching_adobe_documents(final_pdf_path, app)
         remove_existing_output(final_pdf_path)
         # ======================================================
         # Preserve the source format. Renaming PDF bytes to .ai can open in
