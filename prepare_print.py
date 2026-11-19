@@ -1331,10 +1331,16 @@ def run_illustrator_split(source_file_path, order_number, output_folder, order_p
         # === שינוי לדריסה: מחיקת קובץ קיים במקום יצירת עותק ===
         remove_existing_output(final_pdf_path)
         # ======================================================
-        temp_ai = os.path.join(output_folder, "temp_work.ai")
-        shutil.copyfile(source_file_path, temp_ai)
+        # Preserve the source format. Renaming PDF bytes to .ai can open in
+        # Illustrator but later fail on SaveAs with the opaque CONF error.
+        source_ext = os.path.splitext(source_file_path)[1].lower()
+        if source_ext not in (".pdf", ".ai"):
+            source_ext = ".pdf"
+        temp_work_path = os.path.join(output_folder, f"temp_work{source_ext}")
+        remove_existing_output(temp_work_path)
+        shutil.copyfile(source_file_path, temp_work_path)
         try:
-            work_doc = app.Open(temp_ai)
+            work_doc = app.Open(temp_work_path)
             # הסרת שכבה/קבוצה "information" מתוך Simulation בכל מוצר (גם אם נעולה)
             try:
                 app.DoJavaScript(JSX_REMOVE_INFORMATION_FROM_SIMULATION)
@@ -1416,8 +1422,8 @@ def run_illustrator_split(source_file_path, order_number, output_folder, order_p
                 if work_doc is not None:
                     work_doc.Close(2)
             except: pass
-        if os.path.exists(temp_ai):
-            try: os.remove(temp_ai)
+        if os.path.exists(temp_work_path):
+            try: os.remove(temp_work_path)
             except: pass
     if failed_jobs:
         raise RuntimeError(
