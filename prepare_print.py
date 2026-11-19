@@ -1141,15 +1141,46 @@ def remove_existing_output(path, attempts=4):
     ) from last_error
 
 
-def save_print_pdf_with_retry(doc, output_path, attempts=3):
-    """Save a print PDF and recover from Illustrator's transient CONF failure."""
+def save_print_pdf_with_retry(app, doc, output_path, attempts=3):
+    """Save through Illustrator's own JavaScript engine using Press Quality."""
+    try:
+        preset_text = app.DoJavaScript(
+            '(function () { return app.PDFPresetsList.join("\\n"); }())'
+        )
+        available_presets = [p.strip() for p in str(preset_text).splitlines() if p.strip()]
+        print(f"   > Illustrator PDF presets: {available_presets}")
+        if "[Press Quality]" not in available_presets:
+            raise RuntimeError(
+                "Illustrator does not have the required [Press Quality] PDF preset. "
+                f"Available presets: {available_presets}"
+            )
+    except RuntimeError:
+        raise
+    except Exception as preset_error:
+        print(f"   > Could not read Illustrator PDF preset list: {preset_error}")
+
     last_error = None
     for attempt in range(1, attempts + 1):
         remove_existing_output(output_path)
         try:
-            pdf_opts = win32com.client.Dispatch("Illustrator.PDFSaveOptions")
-            pdf_opts.PDFPreset = "[Press Quality]"
-            doc.SaveAs(output_path, pdf_opts)
+            doc.Activate()
+            jsx_output_path = json.dumps(
+                os.path.abspath(output_path).replace("\\", "/"), ensure_ascii=False
+            )
+            save_script = f'''(function () {{
+                var outputFile = new File({jsx_output_path});
+                if (outputFile.exists && !outputFile.remove()) {{
+                    throw new Error("Cannot remove existing output: " + outputFile.fsName);
+                }}
+                var options = new PDFSaveOptions();
+                options.pDFPreset = "[Press Quality]";
+                options.preserveEditability = true;
+                app.activeDocument.saveAs(outputFile, options);
+                return "PRESS_QUALITY_SAVE_OK";
+            }}())'''
+            save_result = app.DoJavaScript(save_script)
+            if str(save_result) != "PRESS_QUALITY_SAVE_OK":
+                raise RuntimeError(f"Unexpected Illustrator save result: {save_result!r}")
             if not os.path.isfile(output_path) or os.path.getsize(output_path) == 0:
                 raise RuntimeError("Illustrator returned without creating a valid PDF")
             return
@@ -1407,7 +1438,7 @@ def run_illustrator_split(source_file_path, order_number, output_folder, order_p
                     print(f"   > A4 לרוחב (2Pocket) הוחל")
                 except Exception as e:
                     print(f"   > אזהרה: שינוי A4 לרוחב נכשל: {e}")
-            save_print_pdf_with_retry(work_doc, final_pdf_path)
+            save_print_pdf_with_retry(app, work_doc, final_pdf_path)
             work_doc.Close(2)
             files_created.append({
                 "path": final_pdf_path,
