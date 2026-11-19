@@ -110,7 +110,9 @@ app.post('/prepare-print', async (req, res) => {
         const pythonArgs = [path.join(__dirname, 'prepare_print.py'), localFilePath, orderId, thickness];
         if (orderPayloadPath) pythonArgs.push(orderPayloadPath);
         console.log(`   [דיבוג] מריץ פייתון עם ${pythonArgs.length} ארגומנטים`);
-        const pythonProcess = spawn(PYTHON_EXE, pythonArgs, { shell: true, cwd: __dirname });
+        // Pass arguments directly to Python. Using shell:true concatenates
+        // unescaped order data into a command line and triggers Node DEP0190.
+        const pythonProcess = spawn(PYTHON_EXE, pythonArgs, { cwd: __dirname });
         pythonProcess.stdout.on('data', (data) => console.log(`[Python]: ${data}`));
         pythonProcess.stderr.on('data', (data) => console.error(`[Error]: ${data}`));
         pythonProcess.on('close', (code) => {
