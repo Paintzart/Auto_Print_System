@@ -1064,6 +1064,7 @@ function main() {
     app.displayDialogs = DialogModes.NO;
     var filePath = FILE_PATH;
     var savePath = SAVE_PATH;
+        var presetPath = PRESET_PATH;
     var contractPx = CONTRACT_PX;
     try {
         var idOpn = charIDToTypeID("Opn ");
@@ -1109,7 +1110,11 @@ function main() {
             try {
                 if (saveFile.exists) saveFile.remove();
                 var opts1 = new PDFSaveOptions();
-                opts1.presetFile = "[Press Quality]";
+                var presetFile = new File(presetPath);
+                if (!presetFile.exists) {
+                    throw new Error("Press Quality.joboptions was not found: " + presetPath);
+                }
+                opts1.presetFile = presetFile;
                 doc.saveAs(saveFile, opts1, true); saved = true;
             } catch(saveError) {
                 lastSaveError = saveError.message;
@@ -1535,6 +1540,28 @@ def run_photoshop_processing(files_list, default_contract_px, thickness_map=None
                 return
     if ps is None:
         return
+    preset_candidates = [os.path.join(BASE_DIR, "Press Quality.joboptions")]
+    adobe_roots = []
+    for env_name in ("PROGRAMDATA", "APPDATA", "LOCALAPPDATA", "ProgramFiles", "ProgramFiles(x86)"):
+        env_root = os.environ.get(env_name)
+        if env_root:
+            adobe_root = os.path.join(env_root, "Adobe")
+            if os.path.isdir(adobe_root):
+                adobe_roots.append(adobe_root)
+    for adobe_root in adobe_roots:
+        for root, _dirs, names in os.walk(adobe_root):
+            for name in names:
+                if name.lower() == "press quality.joboptions":
+                    preset_candidates.append(os.path.join(root, name))
+    press_quality_preset = next(
+        (candidate for candidate in preset_candidates if os.path.isfile(candidate)),
+        None,
+    )
+    if not press_quality_preset:
+        print("❌ Photoshop cannot save with Press Quality: Press Quality.joboptions was not found.")
+        print(f"   Export [Press Quality] from Adobe PDF Presets to: {BASE_DIR}\\Press Quality.joboptions")
+        return
+    print(f"   > Photoshop Press Quality preset file: {press_quality_preset}")
     thickness_map = thickness_map or {}
     for entry in files_list:
         if isinstance(entry, dict):
@@ -1561,6 +1588,7 @@ def run_photoshop_processing(files_list, default_contract_px, thickness_map=None
             .replace("FILE_PATH", json.dumps(abs_path))
             # Photoshop must not overwrite the PDF that it currently has open.
             .replace("SAVE_PATH", json.dumps(photoshop_output_path))
+            .replace("PRESET_PATH", json.dumps(press_quality_preset.replace("\\", "/")))
             .replace("STATUS_PATH", json.dumps(status_path))
             .replace("CONTRACT_PX", str(contract_px))
         )
