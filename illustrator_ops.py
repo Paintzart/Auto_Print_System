@@ -3691,7 +3691,7 @@ JSX_SIMULATION_DETAILS = r"""
         return populated;
     }
 
-    function colorThreadNumber(thread, index, values) {
+    function colorThreadNumber(thread, index, ink) {
         var label = String(index);
         var number = simulationItem(thread, label, "TextFrame", false);
         if (!number) {
@@ -3705,9 +3705,7 @@ JSX_SIMULATION_DETAILS = r"""
         }
         if (!number) return;
         unlockSimulationItem(number);
-        var brightness = 0.299 * values[0] + 0.587 * values[1] + 0.114 * values[2];
-        var ink = brightness < 128 ? 255 : 0;
-        number.textRange.characterAttributes.fillColor = rgb([ink, ink, ink]);
+        number.textRange.characterAttributes.fillColor = ink;
     }
 
     function updateThreadSwatches() {
@@ -3719,19 +3717,22 @@ JSX_SIMULATION_DETAILS = r"""
         }
         var populated = false;
         for (var i = 1; i <= 6; i++) {
-            var thread = simulationItem(group, "Embroidery_" + i, "GroupItem", true);
-            if (!thread) continue;
+            // Some templates give slots 1 and 6 the same group name.
+            var swatch = simulationItem(group, "Color_" + i, "PathItem", false);
+            if (!swatch) continue;
+            var thread = swatch.parent;
             if (i > data.threadColors.length) {
                 removeSimulationItem(thread);
                 continue;
             }
-            var swatch = simulationItem(thread, "Color_" + i, "PathItem", false);
-            if (swatch) {
-                var color = data.threadColors[i - 1];
-                setFill(swatch, color);
-                colorThreadNumber(thread, i, color);
-                populated = true;
-            }
+            var color = data.threadColors[i - 1];
+            var brightness = 0.299 * color[0] + 0.587 * color[1] + 0.114 * color[2];
+            var channel = brightness < 128 ? 255 : 0;
+            var ink = rgb([channel, channel, channel]);
+            setFill(swatch, color);
+            if (swatch.stroked) swatch.strokeColor = ink;
+            colorThreadNumber(thread, i, ink);
+            populated = true;
         }
         return populated;
     }
