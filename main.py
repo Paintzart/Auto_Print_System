@@ -661,18 +661,19 @@ def apply_sidebar_to_open_document(app, doc_name: str, order_data: Optional[Dict
         os.path.join(BASE_DIR, "current_job.json").replace("\\", "/"),
         ensure_ascii=True,
     )
-    safe_doc = doc_name.replace("\\", "\\\\").replace('"', '\\"')
+    doc_name_js = json.dumps(doc_name, ensure_ascii=True)
     jsx = f"""
     #target illustrator
     (function() {{
-        var want = "{safe_doc}";
+        var want = {doc_name_js};
+        var doc = null;
         for (var i = 0; i < app.documents.length; i++) {{
             if (app.documents[i].name === want) {{
-                app.activeDocument = app.documents[i];
+                doc = app.documents[i];
                 break;
             }}
         }}
-        var doc = app.activeDocument;
+        if (!doc) throw new Error("Sidebar target document not found: " + want);
         try {{ doc.layers.getByName("1"); }} catch(e) {{
             var l1 = doc.layers.add();
             l1.name = "1";
@@ -681,10 +682,9 @@ def apply_sidebar_to_open_document(app, doc_name: str, order_data: Optional[Dict
                 if (lay !== l1) lay.move(l1, ElementPlacement.PLACEATEND);
             }}
         }}
-        $.global.targetMasterDoc = doc;
-        $.global.sidebarJobPath = {sidebar_job_path_js};
         var sidebarSource = {sidebar_source_js};
-        eval(sidebarSource);
+        var addSidebar = eval("(function (sidebarTargetDoc, sidebarJobPath) {{\\n" + sidebarSource + "\\n}})");
+        addSidebar(doc, {sidebar_job_path_js});
     }})();
     """
     try:
@@ -739,7 +739,6 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
     job_config["ordered_products"] = ordered_products
     with open(os.path.join(BASE_DIR, "current_job.json"), "w", encoding="utf-8") as f:
         json.dump(job_config, f, ensure_ascii=False, indent=4)
-    js_files = [f.replace("\\", "/") for f in files_list]
     merge_open_dir = os.path.join(BASE_DIR, "temp_ai_files", "_merge_open")
     os.makedirs(merge_open_dir, exist_ok=True)
     local_merge_files = []
@@ -855,26 +854,8 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
         $.writeln("masterDoc name: " + masterDoc.name);
         if (showSidebar && !sidebarAlreadyApplied && !docHasSidebarLayer(masterDoc) && sidebarSource !== null) {{
             mergeStage = "adding simulation sidebar";
-            $.writeln("--- Calling sidebar_logic.jsx ---");
-            // העברת masterDoc כמשתנה גלובלי ל-sidebar_logic.jsx
-            var targetDoc = masterDoc;
-            $.writeln("Activating targetDoc: " + targetDoc.name);
-            targetDoc.activate();
-            $.writeln("Active document after activation: " + app.activeDocument.name);
-            // הגדרת משתנה גלובלי ש-sidebar_logic.jsx יוכל להשתמש בו
-            $.global.targetMasterDoc = targetDoc;
-            $.global.sidebarJobPath = {sidebar_job_path_js};
-            $.writeln("targetMasterDoc set in global");
-            $.writeln("Evaluating sidebar logic from memory...");
-            eval(sidebarSource);
-            $.writeln("sidebar_logic.jsx execution completed");
-            // וידוא ש-masterDoc נשאר פעיל אחרי הוספת התפריט הצד
-            $.writeln("Reactivating targetDoc after sidebar logic...");
-            targetDoc.activate();
-            $.writeln("Final active document: " + app.activeDocument.name);
-            $.writeln("Document layers count: " + targetDoc.layers.length);
-            $.writeln("Document artboards count: " + targetDoc.artboards.length);
-            $.writeln("--- Sidebar logic complete ---");
+            var addSidebar = eval("(function (sidebarTargetDoc, sidebarJobPath) {{\\n" + sidebarSource + "\\n}})");
+            addSidebar(masterDoc, {sidebar_job_path_js});
         }} else {{
             $.writeln("Sidebar skipped (showSidebar=" + showSidebar + ", alreadyApplied=" + sidebarAlreadyApplied + ", hasLayer=" + docHasSidebarLayer(masterDoc) + ", sourceLoaded=" + (sidebarSource !== null) + ")");
         }}
@@ -1024,43 +1005,37 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
 
         javascript_method(jsx_content)
         print(f"🔍 DEBUG: JavaScript executed")
-        print(f"🔍 DEBUG: Number of open documents: {app.Documents.Count}")
-        if app.Documents.Count > 0:
-            doc = app.ActiveDocument
-            # וידוא שהמסמך הנכון פעיל (temp_0 - קובץ האיחוד)
-            doc_name = doc.Name
-            print(f"DEBUG: Active document before save: {doc_name}")
-            # אם יש כמה מסמכים פתוחים, נחפש את temp_0
-            if "temp_0" not in doc_name and app.Documents.Count > 1:
-                print(f"🔍 DEBUG: temp_0 not in active doc, searching...")
-                for i in range(1, app.Documents.Count + 1):
-                    try:
-                        temp_doc = app.Documents[i]
-                        print(f"🔍 DEBUG: Checking document {i}: {temp_doc.Name}")
-                        if "temp_0" in temp_doc.Name:
-                            doc = temp_doc
-                            doc.Activate()
-                            print(f"✅ DEBUG: Found and activated temp_0: {doc.Name}")
-                            break
-                    except Exception as e:
-                        print(f"⚠️ DEBUG: Error checking document {i}: {e}")
-                        continue
+        documents = app.Documents
+        master_path = os.path.normcase(os.path.abspath(js_files[0]))
+        doc = None
+        for index in range(1, documents.Count + 1):
+            candidate = documents.Item(index)
+            try:
+                candidate_path = os.path.normcase(os.path.abspath(str(candidate.FullName)))
+            except Exception:
+                continue
+            if candidate_path == master_path:
+                doc = candidate
+                break
+        if doc is not None:
+            print(f"🔍 DEBUG: Merged document before save: {doc.Name}")
             # בדיקה כמה שכבות יש במסמך (כדי לראות אם התפריט הצד נוסף)
             try:
-                layers_count = doc.Layers.Count
+                layers = doc.Layers
+                layers_count = layers.Count
                 print(f"🔍 DEBUG: Document has {layers_count} layers")
                 # בדיקה אם יש שכבה בשם Sidebar_Layer
                 has_sidebar = False
                 for i in range(1, layers_count + 1):
                     try:
-                        layer = doc.Layers[i]
+                        layer = layers.Item(i)
                         if "Sidebar" in layer.Name:
                             has_sidebar = True
                             print(f"✅ DEBUG: Found Sidebar layer: {layer.Name}")
                             break
                     except:
                         continue
-                if not has_sidebar:
+                if show_sidebar and not has_sidebar:
                     print(f"⚠️ WARNING: No Sidebar layer found in document!")
             except Exception as e:
                 print(f"⚠️ DEBUG: Error checking layers: {e}")
@@ -1109,7 +1084,7 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
             doc.Close(2)
             print(f"✅ DEBUG: Document closed")
             return True
-        raise RuntimeError("Illustrator merge completed without an open output document")
+        raise RuntimeError(f"Illustrator merge completed without the expected document: {master_path}")
     except Exception as e:
         print(f"Error during execution/save: {e}")
         import traceback
