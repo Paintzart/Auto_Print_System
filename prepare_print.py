@@ -8,6 +8,7 @@ import json
 import pythoncom
 import shutil
 from urllib.parse import urlencode
+from illustrator_ops import JSX_SIMULATION_ITEMS
 # הגדרת קידוד לקונסול כדי לתמוך בעברית ונתיבים
 sys.stdout.reconfigure(encoding='utf-8')
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -879,72 +880,31 @@ function recolorItems(items, color) {
 }
 checkAndRecolorAllLayers();
 """
-# הסרת שכבה/קבוצה "information" מתוך Simulation בכל מוצר (גם אם נעולה) – להכנת קובץ הדפסה
-JSX_REMOVE_INFORMATION_FROM_SIMULATION = r"""
+JSX_REMOVE_PRINT_SIMULATION_DETAILS = r"""
 #target illustrator
-function removeNamedRecursive(container, name) {
-    if (!container) return;
-    try {
-        if (container.textFrames) {
-            for (var t = container.textFrames.length - 1; t >= 0; t--) {
-                try {
-                    if (container.textFrames[t].name === name) container.textFrames[t].remove();
-                } catch (eT) {}
+""" + JSX_SIMULATION_ITEMS + r"""
+(function() {
+    function cleanSimulationLayers(container) {
+        for (var i = container.layers.length - 1; i >= 0; i--) {
+            var layer = container.layers[i];
+            if (layer.name !== "Simulation") {
+                cleanSimulationLayers(layer);
+                continue;
+            }
+            removeSimulationItem(simulationItem(layer, "Customer_Name", "TextFrame", true));
+            removeSimulationItem(simulationItem(layer, "Line", null, true));
+            removeSimulationItem(simulationItem(layer, "Number_Order", "GroupItem", true));
+            // Older templates keep the number as a standalone text frame.
+            removeSimulationItem(simulationItem(layer, "NumberOrder", "TextFrame", false));
+            removeSimulationItem(simulationItem(layer, "information", "GroupItem", true));
+            for (var j = layer.layers.length - 1; j >= 0; j--) {
+                var child = layer.layers[j];
+                if (child.name === "information") removeSimulationItem(child);
             }
         }
-    } catch (e1) {}
-    try {
-        if (container.pageItems) {
-            for (var i = container.pageItems.length - 1; i >= 0; i--) {
-                var it = container.pageItems[i];
-                try {
-                    if (it.name === name && it.typename === "TextFrame") {
-                        it.remove();
-                        continue;
-                    }
-                } catch (e2) {}
-                if (it.typename === "GroupItem") removeNamedRecursive(it, name);
-            }
-        }
-    } catch (e3) {}
-    try {
-        if (container.layers) {
-            for (var j = 0; j < container.layers.length; j++) {
-                removeNamedRecursive(container.layers[j], name);
-            }
-        }
-    } catch (e4) {}
-}
-function removeInformationFromSimulation() {
-    var doc = app.activeDocument;
-    // מחיקת NumberOrder מכל המסמך (בהדפסה כבר כותבים בגדול ב-Sidebar)
-    try { doc.textFrames.getByName("NumberOrder").remove(); } catch (eN) {}
-    removeNamedRecursive(doc, "NumberOrder");
-    for (var i = 0; i < doc.layers.length; i++) {
-        var mainLayer = doc.layers[i];
-        if (!/^\d+$/.test(mainLayer.name)) continue;
-        try {
-            var simLayer = mainLayer.layers.getByName("Simulation");
-            simLayer.locked = false;
-            simLayer.visible = true;
-            removeNamedRecursive(simLayer, "NumberOrder");
-            // נסיון למחוק שכבת "information"
-            try {
-                var infoLayer = simLayer.layers.getByName("information");
-                infoLayer.locked = false;
-                infoLayer.visible = true;
-                infoLayer.remove();
-            } catch (e1) {
-                // אולי זו קבוצה (group) בשם "information"
-                try {
-                    var infoGroup = simLayer.groupItems.getByName("information");
-                    infoGroup.remove();
-                } catch (e2) {}
-            }
-        } catch (e) {}
     }
-}
-removeInformationFromSimulation();
+    cleanSimulationLayers(app.activeDocument);
+})();
 """
 # שינוי הארטבורד ל-A4 לרוחב ומרכוז התוכן (למצב 2Pocket)
 JSX_RESIZE_ARTBOARD_A4_LANDSCAPE = r"""
@@ -1426,11 +1386,7 @@ def run_illustrator_split(source_file_path, order_number, output_folder, order_p
         shutil.copyfile(source_file_path, temp_work_path)
         try:
             work_doc = app.Open(temp_work_path)
-            # הסרת שכבה/קבוצה "information" מתוך Simulation בכל מוצר (גם אם נעולה)
-            try:
-                app.DoJavaScript(JSX_REMOVE_INFORMATION_FROM_SIMULATION)
-            except Exception:
-                pass
+            app.DoJavaScript(JSX_REMOVE_PRINT_SIMULATION_DETAILS)
             # צביעה ללבן: רק אם הרשימה ריקה – זיהוי אוטומטי (שחור בהדפסה + לבן בהדמיה). אם יש רשימה – צובעים רק את מה שברשימה, בלי שום בדיקה.
             try:
                 if white_print_locations:
@@ -1680,13 +1636,12 @@ def create_simulation_summary_file(source_file_path, order_number, output_folder
     except:
         pass
     try:
-        app.Open(source_file_path)
-        # הסרת information + NumberOrder מתוך Simulation (בהדפסה המספר בגדול ב-Sidebar)
+        source_doc = app.Open(source_file_path)
         try:
-            app.DoJavaScript(JSX_REMOVE_INFORMATION_FROM_SIMULATION)
-            print("   > Removed information + NumberOrder from print simulation")
+            app.DoJavaScript(JSX_REMOVE_PRINT_SIMULATION_DETAILS)
         except Exception:
-            pass
+            source_doc.Close(2)
+            raise
         if is_only_product_1:
             # יצירת הקובץ מאפס עבור מוצר 1 בלבד
             print(f"   > Creating Print file from scratch for Product 1 only...")

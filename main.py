@@ -16,8 +16,9 @@ from typing import Dict, Any, Optional
 # הגדרת קידוד
 sys.stdout.reconfigure(encoding='utf-8')
 # ייבוא הפונקציות הגרפיות
-from illustrator_ops import run_jsx, open_and_color_template, place_and_simulate_print, update_size_label, delete_side_assets, delete_print_layer_only, save_pdf, clean_layout, apply_extra_colors, delete_information_layer, set_order_number_in_simulation, remove_order_number_from_simulation, set_fabric_type_in_simulation, close_all_illustrator_documents, save_native_ai, is_pdf_disguised_as_ai, VARIABLE_PRINT_COLS, VARIABLE_PRINT_GAP_MIN
-from vectorizer_ops import convert_to_svg
+from illustrator_ops import run_jsx, open_and_color_template, place_and_simulate_print, update_size_label, delete_side_assets, delete_print_layer_only, save_pdf, clean_layout, apply_simulation_details, close_all_illustrator_documents, save_native_ai, is_pdf_disguised_as_ai, VARIABLE_PRINT_COLS, VARIABLE_PRINT_GAP_MIN
+from illustrator_ops import JSX_SIMULATION_STACKING
+from vectorizer_ops import IS_TEST_MODE, convert_to_svg
 # --- הגדרות ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMP_DOWNLOAD_DIR = os.path.join(BASE_DIR, "temp_downloads")
@@ -308,7 +309,7 @@ def normalize_side_name(name: str) -> Optional[str]:
 
 
 SIDE_DEFAULTS = {
-    'front': {'prefix': 'F', 'category': 'A4', 'label': 'size_Front', 'heb': 'קדמי'},
+    'front': {'prefix': 'F', 'category': 'A4', 'label': 'size_Front', 'heb': 'קידמי'},
     'back': {'prefix': 'B', 'category': 'A4', 'label': 'size_Back', 'heb': 'אחורי'},
     'right_sleeve': {'prefix': 'RS', 'category': 'Sleeve', 'label': 'size_Right_Sleeve', 'heb': 'שרוול ימין'},
     'left_sleeve': {'prefix': 'LS', 'category': 'Sleeve', 'label': 'size_Left_Sleeve', 'heb': 'שרוול שמאל'},
@@ -340,7 +341,10 @@ def resolve_reuse_product_number(ref_product, products_all) -> int:
 def enrich_side_data(side: str, data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     merged = dict(SIDE_DEFAULTS.get(side, {}))
     if data:
-        merged.update({k: v for k, v in data.items() if v is not None and v != ''})
+        merged.update({
+            k: v for k, v in data.items()
+            if k not in ('prefix', 'label', 'heb') and v is not None and v != ''
+        })
     return merged
 
 
@@ -365,7 +369,7 @@ def parse_reuse_print_from(loc_data: Dict[str, Any]) -> Optional[tuple[int, str]
 
 
 def side_data_for_cache(loc_data: Dict[str, Any]) -> Dict[str, Any]:
-    skip_keys = {'file', 'file_url', 'reuse_print_from', 'reusePrintFrom'}
+    skip_keys = {'file', 'file_url', 'reuse_print_from', 'reusePrintFrom', 'prefix', 'label', 'heb'}
     return {k: v for k, v in loc_data.items() if k not in skip_keys and not str(k).startswith('_')}
 
 
@@ -422,7 +426,36 @@ def resolve_side_assets(
 # -----------------------------------------------------------
 # עיבוד בודד (ללא שינוי, זה עובד טוב)
 # -----------------------------------------------------------
-def process_single_product_to_temp(order, idx, folder, is_wholesale=False, order_id=None, products_all=None, side_cache=None):
+def apply_product_simulation_details(app, order, order_id, customer_name):
+    extra_colors = []
+    for name in order.get('extra_colors_hebrew') or []:
+        pair = [get_hex_smart(part.strip()) for part in name.split('-', 2)[:2]]
+        pair = [color for color in pair if color != 'ORIGINAL']
+        if pair:
+            extra_colors.append(pair)
+
+    thread_colors = []
+    raw_threads = order.get('embroidery_thread_colors')
+    if isinstance(raw_threads, list):
+        for value in raw_threads[:6]:
+            color = try_parse_hex_color(value)
+            if color:
+                thread_colors.append(color)
+
+    fabric_type = ''
+    if order.get('product_type', 'Shirt') == 'Shirt':
+        fabric_type = str(order.get('fabric_type') or order.get('fabricType') or '').strip()
+    apply_simulation_details(
+        app,
+        order_id=order_id,
+        customer_name=customer_name.strip() if isinstance(customer_name, str) else '',
+        fabric_type=fabric_type,
+        extra_colors=extra_colors,
+        thread_colors=thread_colors,
+    )
+
+
+def process_single_product_to_temp(order, idx, folder, is_wholesale=False, order_id=None, products_all=None, side_cache=None, customer_name=None):
     if side_cache is None:
         side_cache = {}
     if products_all is None:
@@ -453,7 +486,7 @@ def process_single_product_to_temp(order, idx, folder, is_wholesale=False, order
                 cached = resolve_side_assets(src_p, src_s, products_all, folder, side_cache)
                 svgs[s] = cached['svg']
                 order[s] = {
-                    **enrich_side_data(src_s, cached['side_data']),
+                    **enrich_side_data(s, cached['side_data']),
                     'exists': True,
                     '_skip_print_layer': True,
                 }
@@ -474,13 +507,10 @@ def process_single_product_to_temp(order, idx, folder, is_wholesale=False, order
         h2 = get_hex_smart(parts[1]) if len(parts) >= 2 else h1
         is_split = len(parts) >= 2
         doc, app = open_and_color_template(t_path, h1, h2, is_split, prod)
-        extra = order.get('extra_colors_hebrew', [])
-        extra_data = []
-        for name in extra:
-            p = [x.strip() for x in name.split("-")]
-            pair = [get_hex_smart(c) for c in p[:2] if get_hex_smart(c)!='ORIGINAL']
-            if pair: extra_data.append(pair)
-        apply_extra_colors(app, extra_data)
+        has_sleeve_print = any(
+            side_is_active(order.get(side)) and not order[side].get('_skip_print_layer')
+            for side in ('right_sleeve', 'left_sleeve')
+        )
         for s in sides:
             d = enrich_side_data(s, order.get(s, {}) or {})
             if not side_is_active(d) or not svgs.get(s):
@@ -489,12 +519,15 @@ def process_single_product_to_temp(order, idx, folder, is_wholesale=False, order
             fc = resolve_print_color(d.get('req_color_hebrew'), h1)
             cp = fc if fc != '#FFFFFF' else '#000000'
             prefix = d.get('prefix') or SIDE_TO_PREFIX.get(s, 'F')
-            w = place_and_simulate_print(doc, app, svgs[s], prefix, d.get('category', 'A4'), cp, fc, is_r)
+            w = place_and_simulate_print(
+                doc, app, svgs[s], prefix, d.get('category', 'A4'), cp, fc, is_r,
+                should_update_size_label=False,
+            )
             label = d.get('label') or SIDE_DEFAULTS.get(s, {}).get('label', f'size_{s}')
             heb = d.get('heb') or SIDE_DEFAULTS.get(s, {}).get('heb', '')
             if w>0: update_size_label(doc, app, label, w, heb)
             if d.get('_skip_print_layer'):
-                delete_print_layer_only(app, prefix)
+                delete_print_layer_only(app, prefix, keep_artboard=prefix in ('RS', 'LS') and has_sleeve_print)
                 print(f"   > [Product {idx+1}] {s}: removed Print layer (reuse)")
             orig = enrich_side_data(s, original_sides[s])
             reuse_from = parse_reuse_print_from(orig)
@@ -509,30 +542,14 @@ def process_single_product_to_temp(order, idx, folder, is_wholesale=False, order
                 side_cache[(idx + 1, s)] = side_cache[(src_p, src_s)]
         rs_active = side_is_active(order.get('right_sleeve', {}))
         ls_active = side_is_active(order.get('left_sleeve', {}))
-        if not rs_active and not ls_active:
-            delete_side_assets(doc, app, "Print_Sleeves", "size_Right_Sleeve")
-            run_jsx(app, "try{app.activeDocument.textFrames.getByName('size_Left_Sleeve').remove();}catch(e){}")
-        elif not rs_active:
-            run_jsx(app, "try{app.activeDocument.textFrames.getByName('size_Right_Sleeve').remove();}catch(e){}")
-        elif not ls_active:
-            run_jsx(app, "try{app.activeDocument.textFrames.getByName('size_Left_Sleeve').remove();}catch(e){}")
+        if not rs_active:
+            delete_side_assets(doc, app, "Print_Sleeves" if not ls_active else "", "size_Right_Sleeve")
+        if not ls_active:
+            delete_side_assets(doc, app, "", "size_Left_Sleeve")
         if not side_is_active(order.get('front', {})): delete_side_assets(doc, app, "Print_Front", "size_Front")
         if not side_is_active(order.get('back', {})): delete_side_assets(doc, app, "Print_Back", "size_Back")
         clean_layout(app)
-        # מוסיפים מספר הזמנה ל"NumberOrder" בכל המוצרים; במוצרים 2+ מוחקים את התיבה – נשאר רק בראשון
-        if order_id:
-            set_order_number_in_simulation(app, order_id)
-            if idx >= 1:
-                remove_order_number_from_simulation(app)
-        # הדמיית חולצה: fabric_type → תיבת טקסט "type"
-        fabric_type = order.get('fabric_type') or order.get('fabricType')
-        if prod == 'Shirt' and fabric_type:
-            print(f"   > [Product {idx+1}] fabric_type → type: {fabric_type}")
-            set_fabric_type_in_simulation(app, fabric_type)
-        # אם זה סיטונאי, מוחקים את שכבה/קבוצה "information" מתוך "Simulation"
-        if is_wholesale:
-            print(f"   > [Product {idx+1}] מחיקת שכבה 'information'...")
-            delete_information_layer(app)
+        apply_product_simulation_details(app, order, order_id, customer_name)
         out_name = f"temp_{idx}.ai"
         out_path = os.path.join(TEMP_AI_DIR, out_name)
         save_native_ai(doc, out_path)
@@ -755,6 +772,7 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
     )
     jsx_content = f"""
     #target illustrator
+    {JSX_SIMULATION_STACKING}
     var files = {json.dumps(js_files)};
     var mergeStage = "startup";
     function fileLooksLikePdf(f) {{
@@ -860,6 +878,8 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
         }} else {{
             $.writeln("Sidebar skipped (showSidebar=" + showSidebar + ", alreadyApplied=" + sidebarAlreadyApplied + ", hasLayer=" + docHasSidebarLayer(masterDoc) + ", sourceLoaded=" + (sidebarSource !== null) + ")");
         }}
+        mergeStage = "ordering simulation layers";
+        orderSimulationLayers(masterDoc);
         mergeStage = "reordering artboards";
         reorderArtboardsSafe(masterDoc);
         mergeStage = "complete";
@@ -876,6 +896,11 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
     }}
     function organizeMasterContent(doc) {{
         app.executeMenuCommand('unlockAll'); app.executeMenuCommand('showAll');
+        // Variable jobs with a sidebar may have already organized product 1.
+        try {{
+            doc.layers.getByName("1").layers.getByName("Simulation");
+            return;
+        }} catch(e) {{}}
         var l1 = doc.layers.add(); l1.name = "1";
         for (var i = doc.layers.length - 1; i >= 0; i--) {{
             var lay = doc.layers[i];
@@ -1092,6 +1117,14 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
         raise RuntimeError(f"Illustrator merge failed: {e}") from e
         # --- MAIN ENTRY ---
 if __name__ == "__main__":
+    if len(sys.argv) == 2 and sys.argv[1] == '--check-embroidery-vectorizer':
+        sys.exit(0 if API_ID and API_SECRET else 1)
+    if len(sys.argv) == 3 and sys.argv[1] == '--vectorize-embroidery':
+        if IS_TEST_MODE:
+            print('Embroidery vectorizer is in test mode')
+            sys.exit(2)
+        svg_path = convert_to_svg(sys.argv[2], API_ID, API_SECRET, retries=0, production=True, use_cache=False)
+        sys.exit(0 if svg_path else 1)
     if len(sys.argv) > 1:
         try:
             # טעינת הנתונים שהגיעו מהקריאה
@@ -1124,8 +1157,6 @@ if __name__ == "__main__":
             is_wholesale = full_data.get('is_wholesale', False)
             print(f"\n{'='*50}")
             print(f"📦 WHOLESALE MODE: {is_wholesale}")
-            if is_wholesale:
-                print(f"   → השכבה 'information' תימחק מכל המוצרים")
             print(f"{'='*50}\n")
             if mode == "variable":
                 from variable_print import download_variable_product_files, process_variable_product_to_temp
@@ -1146,7 +1177,8 @@ if __name__ == "__main__":
                 for i, prod in enumerate(products):
                     ai_file = process_single_product_to_temp(
                         prod, i, order_folder, is_wholesale,
-                        order_id=raw_order_id, products_all=products, side_cache=side_cache
+                        order_id=raw_order_id, products_all=products, side_cache=side_cache,
+                        customer_name=full_data.get('customer_name'),
                     )
                     if ai_file:
                         generated_files.append(ai_file)

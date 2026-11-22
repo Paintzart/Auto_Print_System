@@ -351,6 +351,7 @@ function mapProductForSimulation(prod, index) {
         product_color_hebrew: prod.product_color_hebrew,
         extra_colors_hebrew: prod.extra_colors_hebrew || [],
         fabric_type: prod.fabric_type || prod.fabricType || null,
+        embroidery_thread_colors: prod.embroidery_thread_colors,
         front: mapSimulationLocation(prod.locations?.front),
         back: mapSimulationLocation(prod.locations?.back),
         right_sleeve: mapSimulationLocation(prod.locations?.right_sleeve),
@@ -367,6 +368,7 @@ async function mapProductForVariable(prod) {
         product_color_hebrew: prod.product_color_hebrew,
         extra_colors_hebrew: prod.extra_colors_hebrew || [],
         fabric_type: prod.fabric_type || prod.fabricType || null,
+        embroidery_thread_colors: prod.embroidery_thread_colors,
         front: await mapVariableLocation(side('front'), 'front'),
         back: await mapVariableLocation(side('back'), 'back'),
         right_sleeve: await mapVariableLocation(side('right_sleeve'), 'right'),
@@ -377,7 +379,7 @@ async function mapProductForVariable(prod) {
 // === כפתור סגול: הדמיה ===
 // === כפתור סגול: הדמיה (התיקון לאיחוד הקבצים) ===
 app.post('/run-simulation', async (req, res) => {
-    const { order_id, products, simulation_ad, is_wholesale } = req.body;
+    const { order_id, products, simulation_ad, is_wholesale, customer_name } = req.body;
     console.log(`\n🟣 בקשה להדמיה: הזמנה ${order_id} (${products ? products.length : 0} מוצרים)`);
     if (!products || products.length === 0) {
         return res.status(400).json({ success: false, message: "אין מוצרים" });
@@ -393,6 +395,7 @@ app.post('/run-simulation', async (req, res) => {
         // 2. הכנת המידע המלא לפייתון (כל המוצרים יחד)
         const fullBatchData = {
             order_id: order_id,
+            customer_name,
             products: processedProducts, // כאן נכנסים כל המוצרים
             simulation_ad: simulation_ad || { enabled: false, mode: 'random', selected_products: [] },
             is_wholesale: is_wholesale || false
@@ -409,7 +412,7 @@ app.post('/run-simulation', async (req, res) => {
 
 // === כפתור כתום: הדמיה + הדפס משתנה (מוצר 1) ===
 app.post('/run-variable-simulation', async (req, res) => {
-    const { order_id, products, simulation_ad, is_wholesale } = req.body;
+    const { order_id, products, simulation_ad, is_wholesale, customer_name } = req.body;
     console.log(`\n🟠 בקשה להדמיה משתנה: הזמנה ${order_id}`);
     if (!products || products.length !== 1) {
         return res.status(400).json({ success: false, message: "נדרש בדיוק מוצר 1" });
@@ -438,6 +441,7 @@ app.post('/run-variable-simulation', async (req, res) => {
         const fullBatchData = {
             mode: 'variable',
             order_id,
+            customer_name,
             products: [prod],
             simulation_ad: simulation_ad || { enabled: false, mode: 'random', selected_products: [] },
             is_wholesale: is_wholesale || false,

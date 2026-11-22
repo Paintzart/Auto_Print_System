@@ -9,24 +9,21 @@ import pythoncom
 from typing import Any, Dict, List, Optional
 
 from illustrator_ops import (
-    apply_extra_colors,
     apply_text_overrides_in_layer,
     activate_document,
     clean_layout,
-    delete_information_layer,
     delete_side_assets,
     ensure_variable_print_slot,
     get_template_artboard_size,
     get_template_content_size,
     open_and_color_template,
+    order_simulation_layers,
     outline_text_in_layers,
     outline_document_text,
     place_and_simulate_print,
     place_variable_template_variant,
     refresh_template_side_colors,
     run_jsx,
-    set_order_number_in_simulation,
-    set_fabric_type_in_simulation,
     remove_variable_placement_boxes,
     cleanup_orphan_variable_print_artboards,
     cleanup_stray_print_on_simulation,
@@ -45,7 +42,7 @@ from illustrator_ops import (
 SIDE_KEYS = ["front", "back", "right_sleeve", "left_sleeve"]
 SIDE_TO_PREFIX = {"front": "F", "back": "B", "right_sleeve": "RS", "left_sleeve": "LS"}
 SIDE_DEFAULTS = {
-    "front": {"prefix": "F", "category": "A4", "label": "size_Front", "heb": "קדמי"},
+    "front": {"prefix": "F", "category": "A4", "label": "size_Front", "heb": "קידמי"},
     "back": {"prefix": "B", "category": "A4", "label": "size_Back", "heb": "אחורי"},
     "right_sleeve": {"prefix": "RS", "category": "Sleeve", "label": "size_Right_Sleeve", "heb": "שרוול ימין"},
     "left_sleeve": {"prefix": "LS", "category": "Sleeve", "label": "size_Left_Sleeve", "heb": "שרוול שמאל"},
@@ -633,6 +630,7 @@ def process_variable_product_to_temp(
     from main import (
         TEMP_AI_DIR,
         TEMPLATES,
+        apply_product_simulation_details,
         get_hex_smart,
         normalize_split_product_color,
         resolve_sim_and_print_colors,
@@ -662,15 +660,6 @@ def process_variable_product_to_temp(
         h2 = get_hex_smart(parts[1]) if len(parts) >= 2 else h1
         is_split = len(parts) >= 2
         doc, app = open_and_color_template(t_path, h1, h2, is_split, prod)
-
-        extra = order.get("extra_colors_hebrew", [])
-        extra_data = []
-        for name in extra:
-            p = [x.strip() for x in name.split("-")]
-            pair = [get_hex_smart(c) for c in p[:2] if get_hex_smart(c) != "ORIGINAL"]
-            if pair:
-                extra_data.append(pair)
-        apply_extra_colors(app, extra_data)
 
         for side in variable_sides:
             loc = _enrich_side_data(side, order.get(side, {}) or {})
@@ -703,7 +692,8 @@ def process_variable_product_to_temp(
                 loc.get("req_color_hebrew") or "", h1
             )
             w = place_and_simulate_print(
-                doc, app, svg, prefix, loc.get("category", "A4"), print_hex, sim_hex, is_r
+                doc, app, svg, prefix, loc.get("category", "A4"), print_hex, sim_hex, is_r,
+                should_update_size_label=False,
             )
             label = loc.get("label") or SIDE_DEFAULTS.get(side, {}).get("label", "")
             heb = loc.get("heb") or SIDE_DEFAULTS.get(side, {}).get("heb", "")
@@ -762,7 +752,7 @@ def process_variable_product_to_temp(
                     layer_name=layer_name,
                     artboard_name=artboard_name,
                     skip_simulation=not with_sim,
-                    should_update_size_label=with_sim,
+                    should_update_size_label=False,
                 )
                 if w > 0 and with_sim and label:
                     update_size_label(doc, app, label, w, heb)
@@ -773,13 +763,10 @@ def process_variable_product_to_temp(
 
         rs_active = side_is_active(order.get("right_sleeve", {})) or "right_sleeve" in variable_sides
         ls_active = side_is_active(order.get("left_sleeve", {})) or "left_sleeve" in variable_sides
-        if not rs_active and not ls_active:
-            delete_side_assets(doc, app, "Print_Sleeves", "size_Right_Sleeve")
-            run_jsx(app, "try{app.activeDocument.textFrames.getByName('size_Left_Sleeve').remove();}catch(e){}")
-        elif not rs_active and "right_sleeve" not in variable_sides:
-            run_jsx(app, "try{app.activeDocument.textFrames.getByName('size_Right_Sleeve').remove();}catch(e){}")
-        elif not ls_active and "left_sleeve" not in variable_sides:
-            run_jsx(app, "try{app.activeDocument.textFrames.getByName('size_Left_Sleeve').remove();}catch(e){}")
+        if not rs_active:
+            delete_side_assets(doc, app, "Print_Sleeves" if not ls_active else "", "size_Right_Sleeve")
+        if not ls_active:
+            delete_side_assets(doc, app, "", "size_Left_Sleeve")
 
         if not side_is_active(order.get("front", {})) and "front" not in variable_sides:
             delete_side_assets(doc, app, "Print_Front", "size_Front")
@@ -787,21 +774,14 @@ def process_variable_product_to_temp(
             delete_side_assets(doc, app, "Print_Back", "size_Back")
 
         clean_layout(app)
+        apply_product_simulation_details(app, order, order_id, (order_data or {}).get("customer_name"))
 
         sim_ad = (order_data or {}).get("simulation_ad", {}) or {}
         if sim_ad.get("enabled"):
             from main import apply_sidebar_to_open_document
             apply_sidebar_to_open_document(app, doc.Name, order_data)
 
-        if order_id:
-            set_order_number_in_simulation(app, order_id)
-        fabric_type = order.get("fabric_type") or order.get("fabricType")
-        if prod == "Shirt" and fabric_type:
-            print(f"   > fabric_type → type: {fabric_type}")
-            set_fabric_type_in_simulation(app, fabric_type)
-        if is_wholesale:
-            delete_information_layer(app)
-
+        order_simulation_layers(app)
         _save_order_editable(doc, folder, order_id or "")
         # הדמיה משתנה: שומרים טקסט חי + גופן/גודל מהתבנית (בלי outline)
 

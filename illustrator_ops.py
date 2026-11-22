@@ -622,11 +622,6 @@ try {
     }
 } catch(e) { }
 """
-JSX_DEL = """
-#target illustrator
-try{app.activeDocument.artboards.getByName("%AB%").remove();}catch(e){}
-try{app.activeDocument.textFrames.getByName("%TF%").remove();}catch(e){}
-"""
 JSX_CLEAN_BOXES = """
 #target illustrator
 (function() {
@@ -657,45 +652,6 @@ JSX_CLEAN_BOXES = """
     }
     try { removeBoxesRecursive(app.activeDocument); } catch(e) {}
 })();
-"""
-JSX_EXTRA_COLORS = """
-#target illustrator
-try {
-    var doc = app.activeDocument;
-    var container = null;
-    try { container = doc.layers.getByName("Simulation").groupItems.getByName("Box_Color"); } catch(e) {}
-    if (!container) try { container = doc.layers.getByName("Simulation").layers.getByName("Box_Color"); } catch(e) {}
-    if (container) {
-        var allData = %COLOR_ARRAY%;
-        function applyStyle(item, rgb) {
-            var c = new RGBColor(); c.red = rgb[0]; c.green = rgb[1]; c.blue = rgb[2];
-            var black = new RGBColor(); black.red = 0; black.green = 0; black.blue = 0;
-            item.filled = true; item.fillColor = c;
-            item.stroked = true; item.strokeColor = black; item.strokeWidth = 0.5;
-        }
-        for (var i = 1; i <= 24; i++) {
-            try {
-                var box = container.pageItems.getByName("Color_" + i);
-                if (i <= allData.length) {
-                    var colors = allData[i-1];
-                    if (colors.length === 1) {
-                        applyStyle(box, colors[0]);
-                    } else if (colors.length >= 2) {
-                        // שימוש ב-geometricBounds לדיוק מתמטי (ללא ה-Stroke בחישוב)
-                        var b = box.geometricBounds;
-                        var left = b[0]; var top = b[1]; var right = b[2]; var bottom = b[3];
-                        var w = right - left; var h = top - bottom;
-                        var leftRect = box.parent.pathItems.rectangle(top, left, w/2, h);
-                        applyStyle(leftRect, colors[0]);
-                        var rightRect = box.parent.pathItems.rectangle(top, left + w/2, w/2, h);
-                        applyStyle(rightRect, colors[1]);
-                        box.remove();
-                    }
-                } else { box.remove(); }
-            } catch(e) {}
-        }
-    }
-} catch(e) {}
 """
 JSX_MEASURE_FINAL = """
 #target illustrator
@@ -787,36 +743,98 @@ def clean_arts(grp):
 # -------------------------
 # פונקציות ראשיות
 # -------------------------
+JSX_SIMULATION_ITEMS = r"""
+function simulationItem(container, name, typename, directOnly) {
+    if (!container || !container.pageItems) return null;
+    for (var i = 0; i < container.pageItems.length; i++) {
+        var item = container.pageItems[i];
+        if (item.parent === container && item.name === name && (!typename || item.typename === typename)) return item;
+    }
+    if (directOnly) return null;
+    for (var j = 0; j < container.pageItems.length; j++) {
+        var group = container.pageItems[j];
+        if (group.parent !== container || group.typename !== "GroupItem") continue;
+        var found = simulationItem(group, name, typename, false);
+        if (found) return found;
+    }
+    if (container.layers) {
+        for (var k = 0; k < container.layers.length; k++) {
+            var nested = simulationItem(container.layers[k], name, typename, false);
+            if (nested) return nested;
+        }
+    }
+    return null;
+}
+function unlockSimulationItem(item) {
+    if (item.parent && item.parent.typename !== "Document") unlockSimulationItem(item.parent);
+    item.locked = false;
+}
+function removeSimulationItem(item) {
+    if (!item) return;
+    unlockSimulationItem(item);
+    item.remove();
+}
+function writeSimulationText(item, contents) {
+    if (!item) return;
+    unlockSimulationItem(item);
+    item.contents = contents;
+}
+function sizeGroup(simulation, label) {
+    if (label === "size_Front" || label === "size_Back") {
+        return simulationItem(simulation, "S" + label.slice(1), "GroupItem", true);
+    }
+    return null;
+}
+
+function sizeTextFrame(simulation, label) {
+    var group = sizeGroup(simulation, label);
+    var named = simulationItem(group || simulation, label, "TextFrame", false);
+    if (label !== "size_Left_Sleeve" && label !== "size_Right_Sleeve") return named;
+
+    // Some sleeve captions in existing templates have a different or swapped object name.
+    var left = "שרוול שמאל";
+    var right = "שרוול ימין";
+    var wanted = label === "size_Left_Sleeve" ? left : right;
+    var opposite = label === "size_Left_Sleeve" ? right : left;
+    function plainText(frame) {
+        return frame.contents.replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "")
+            .replace(/\s+/g, " ");
+    }
+    for (var i = 0; i < simulation.textFrames.length; i++) {
+        var frame = simulation.textFrames[i];
+        if (frame.parent !== simulation) continue;
+        var text = plainText(frame);
+        if (text.indexOf(wanted) !== -1 && text.indexOf("רוחב הדפס") !== -1) return frame;
+    }
+    return named && plainText(named).indexOf(opposite) === -1 ? named : null;
+}
+"""
+
+
 def update_size_label(doc, app, name, w, txt):
-    if w <= 1: return
+    if w <= 1:
+        return
     width_cm = int(round(w / 28.34645))
-    final_text = f"{width_cm} ס\"מ רוחב הדפס {txt}"
-    jsx = f"""
-    try {{
-        var doc = app.activeDocument;
-        var simLayer = null;
-        try {{ simLayer = doc.layers.getByName("Simulation"); }} catch(e) {{}}
-        if (simLayer) {{
-            function find(container, n) {{
-                try {{ return container.textFrames.getByName(n); }} catch(e) {{}}
-                if (container.groupItems) {{
-                    for (var i=0; i<container.groupItems.length; i++) {{
-                        var r = find(container.groupItems[i], n);
-                        if (r) return r;
-                    }}
-                }}
-                return null;
-            }}
-            var t = find(simLayer, "{name}");
-            if (t) {{
-                var p = t;
-                while(p) {{ if(p.locked) p.locked=false; try{{p=p.parent;}}catch(e){{break;}} if(p.typename=="Layer") break; }}
-                t.contents = '{final_text}';
-            }}
-        }}
-    }} catch(e) {{ }}
-    """
-    run_jsx(app, jsx)
+    label = json.dumps(name)
+    contents = json.dumps(f"{txt} רוחב הדפס {width_cm} ס”מ")
+    run_jsx(app, JSX_SIMULATION_ITEMS + f"""
+(function() {{
+    var simulation;
+    try {{ simulation = app.activeDocument.layers.getByName("Simulation"); }} catch(e) {{ return; }}
+    var field = sizeTextFrame(simulation, {label});
+    if (!field) return;
+    writeSimulationText(field, {contents});
+    var semibold = app.textFonts.getByName("SegoeUI-Semibold");
+    var semilight = app.textFonts.getByName("SegoeUI-Semilight");
+    var range = field.textRange;
+    range.characterAttributes.textFont = semilight;
+    for (var i = 0; i < {len(txt)}; i++) {{
+        range.characters[i].characterAttributes.textFont = semibold;
+    }}
+}})();
+""")
+
+
 VARIABLE_SIDE_BASE = {
     "front": {"layer": "Print_Front", "artboard": "Print_Front", "prefix": "F"},
     "back": {"layer": "Print_Back", "artboard": "Print_Back", "prefix": "B"},
@@ -3310,7 +3328,7 @@ def place_and_simulate_print(
         txt_suffix = ""
         if pre == "F":
             target_tf = "size_Front"
-            txt_suffix = "קדמי"
+            txt_suffix = "קידמי"
         elif pre == "B":
             target_tf = "size_Back"
             txt_suffix = "אחורי"
@@ -3353,168 +3371,22 @@ def open_and_color_template(path: str, h1: str, h2: str, is_split: bool, prod: s
     s = s.replace('%SR2%', str(sr2)).replace('%SG2%', str(sg2)).replace('%SB2%', str(sb2))
     run_jsx(app, s)
     return doc, app
-def set_order_number_in_simulation(app, order_id: str):
-    """מעדכן או יוצר תיבת טקסט 'NumberOrder' בשכבת Simulation עם מספר ההזמנה (עמוד ראשון / מוצר 1)."""
-    if not order_id:
-        return
-    # Escape single quotes in order_id for JS string
-    safe_id = order_id.replace("\\", "\\\\").replace("'", "\\'").replace("\r", "").replace("\n", " ")
-    jsx_code = """
-    #target illustrator
-    (function() {
-        var orderId = '%ORDER_ID%';
-        var doc = app.activeDocument;
-        var simLayer = null;
-        try { simLayer = doc.layers.getByName("Simulation"); } catch(e) { return 0; }
-        if (!simLayer) return 0;
-        simLayer.visible = true;
-        simLayer.locked = false;
-        function findTextFrame(container, name) {
-            try {
-                if (container.textFrames && container.textFrames.getByName) {
-                    return container.textFrames.getByName(name);
-                }
-            } catch(e) {}
-            if (container.pageItems) {
-                for (var i = 0; i < container.pageItems.length; i++) {
-                    var it = container.pageItems[i];
-                    if (it.name === name && it.typename === "TextFrame") return it;
-                    if (it.typename === "GroupItem" && it.pageItems.length > 0) {
-                        var r = findTextFrame(it, name);
-                        if (r) return r;
-                    }
-                }
-            }
-            if (container.layers) {
-                for (var j = 0; j < container.layers.length; j++) {
-                    var r = findTextFrame(container.layers[j], name);
-                    if (r) return r;
-                }
-            }
-            return null;
-        }
-        var tf = findTextFrame(doc, "NumberOrder") || findTextFrame(simLayer, "NumberOrder");
-        if (tf) {
-            tf.contents = orderId;
-            if (tf.locked) tf.locked = false;
-            return 1;
-        }
-        var rect = simLayer.visibleBounds;
-        if (!rect || rect.length < 4) rect = [50, -50, 250, -100];
-        var top = rect[1]; var left = rect[0];
-        tf = simLayer.textFrames.add();
-        tf.name = "NumberOrder";
-        tf.contents = orderId;
-        tf.position = [left, top - 20];
-        try { tf.textRange.characterAttributes.size = 14; } catch(e) {}
-        return 1;
-    })();
-    """.replace("%ORDER_ID%", safe_id)
-    run_jsx(app, jsx_code)
-
-
-def set_fabric_type_in_simulation(app, fabric_type: str):
-    """מעדכן תיבת טקסט 'type' בשכבת Simulation עם ערך fabric_type (הדמיית חולצה)."""
-    if not fabric_type:
-        return
-    safe = (
-        str(fabric_type)
-        .replace("\\", "\\\\")
-        .replace("'", "\\'")
-        .replace("\r", "")
-        .replace("\n", " ")
-    )
-    jsx_code = """
-    #target illustrator
-    (function() {
-        var fabricType = '%FABRIC_TYPE%';
-        var doc = app.activeDocument;
-        var simLayer = null;
-        try { simLayer = doc.layers.getByName("Simulation"); } catch(e) { return 0; }
-        if (!simLayer) return 0;
-        simLayer.visible = true;
-        simLayer.locked = false;
-        function findTextFrame(container, name) {
-            try {
-                if (container.textFrames && container.textFrames.getByName) {
-                    return container.textFrames.getByName(name);
-                }
-            } catch(e) {}
-            if (container.pageItems) {
-                for (var i = 0; i < container.pageItems.length; i++) {
-                    var it = container.pageItems[i];
-                    if (it.name === name && it.typename === "TextFrame") return it;
-                    if (it.typename === "GroupItem" && it.pageItems.length > 0) {
-                        var r = findTextFrame(it, name);
-                        if (r) return r;
-                    }
-                }
-            }
-            if (container.layers) {
-                for (var j = 0; j < container.layers.length; j++) {
-                    var r = findTextFrame(container.layers[j], name);
-                    if (r) return r;
-                }
-            }
-            return null;
-        }
-        var tf = findTextFrame(doc, "type") || findTextFrame(simLayer, "type")
-              || findTextFrame(doc, "Type") || findTextFrame(simLayer, "Type");
-        if (!tf) return 0;
-        var p = tf;
-        while (p) {
-            if (p.locked) p.locked = false;
-            try { p = p.parent; } catch(e) { break; }
-            if (p.typename == "Layer") break;
-        }
-        tf.contents = fabricType;
-        return 1;
-    })();
-    """.replace("%FABRIC_TYPE%", safe)
-    run_jsx(app, jsx_code)
-
-
-def remove_order_number_from_simulation(app):
-    """מוחק את תיבת הטקסט 'NumberOrder' משכבת Simulation (למוצרים 2 ומעלה – להשאיר מספר הזמנה רק בראשון)."""
-    jsx_code = """
-    #target illustrator
-    (function() {
-        var doc = app.activeDocument;
-        var simLayer = null;
-        try { simLayer = doc.layers.getByName("Simulation"); } catch(e) { return; }
-        if (!simLayer) return;
-        function findAndRemove(container, name) {
-            try {
-                if (container.textFrames && container.textFrames.getByName) {
-                    var tf = container.textFrames.getByName(name);
-                    if (tf) { tf.remove(); return true; }
-                }
-            } catch(e) {}
-            if (container.pageItems) {
-                for (var i = container.pageItems.length - 1; i >= 0; i--) {
-                    var it = container.pageItems[i];
-                    if (it.name === name && it.typename === "TextFrame") { it.remove(); return true; }
-                    if (it.typename === "GroupItem" && it.pageItems.length > 0) {
-                        if (findAndRemove(it, name)) return true;
-                    }
-                }
-            }
-            if (container.layers) {
-                for (var j = container.layers.length - 1; j >= 0; j--) {
-                    if (findAndRemove(container.layers[j], name)) return true;
-                }
-            }
-            return false;
-        }
-        try { doc.textFrames.getByName("NumberOrder").remove(); } catch(e) {}
-        findAndRemove(simLayer, "NumberOrder");
-    })();
-    """
-    run_jsx(app, jsx_code)
-
-
 def delete_side_assets(doc, app, ab: str, tf: str):
-    run_jsx(app, JSX_DEL.replace('%AB%', ab).replace('%TF%', tf))
+    artboard = json.dumps(ab)
+    label = json.dumps(tf)
+    run_jsx(app, JSX_SIMULATION_ITEMS + f"""
+(function() {{
+    var doc = app.activeDocument;
+    if ({artboard}) {{
+        try {{ doc.artboards.getByName({artboard}).remove(); }} catch(e) {{}}
+    }}
+    var simulation;
+    try {{ simulation = doc.layers.getByName("Simulation"); }} catch(e) {{ return; }}
+    var group = sizeGroup(simulation, {label});
+    removeSimulationItem(group || sizeTextFrame(simulation, {label}));
+}})();
+""")
+
 
 _PRINT_LAYER_BY_PREFIX = {
     "F": "Print_Front",
@@ -3524,7 +3396,7 @@ _PRINT_LAYER_BY_PREFIX = {
 }
 
 
-def delete_print_layer_only(app, prefix: str):
+def delete_print_layer_only(app, prefix: str, *, keep_artboard: bool = False):
     """מוחק תוכן שכבת Print + artboard — משאיר Simulation ותווית size."""
     layer_name = _PRINT_LAYER_BY_PREFIX.get(prefix)
     ab_name = am.get(prefix)
@@ -3541,7 +3413,9 @@ def delete_print_layer_only(app, prefix: str):
                 layer.visible = true;
                 while (layer.pageItems.length > 0) layer.pageItems[0].remove();
             }} catch(e) {{}}
-            try {{ doc.artboards.getByName("{ab_name}").remove(); }} catch(e) {{}}
+            if (!{json.dumps(keep_artboard)}) {{
+                try {{ doc.artboards.getByName("{ab_name}").remove(); }} catch(e) {{}}
+            }}
         }} catch(e) {{}}
     }})();
     """
@@ -3691,148 +3565,222 @@ def outline_document_text(app) -> None:
 def clean_layout(app):
     """מוחק את כל ריבועי העזר (Box) מהקובץ"""
     run_jsx(app, JSX_CLEAN_BOXES)
-def delete_information_layer(app):
-    """מוחק את השכבה/קבוצה 'information' מתוך 'Simulation' בכל מוצר"""
-    jsx_code = """
-    #target illustrator
-    (function() {
-        var doc = app.activeDocument;
-        var deletedCount = 0;
-        // פונקציה רקורסיבית למחיקת information מתוך Simulation
-        function deleteInfoFromSimulation(container) {
-            var found = false;
-            // חיפוש שכבה Simulation
-            try {
-                var simLayer = null;
-                // ניסיון למצוא Simulation כשכבה
-                try {
-                    simLayer = container.layers.getByName("Simulation");
-                } catch(e) {
-                    // אם לא נמצאה כשכבה, נחפש רקורסיבית
-                    for (var i = 0; i < container.layers.length; i++) {
-                        var result = deleteInfoFromSimulation(container.layers[i]);
-                        if (result) found = true;
-                    }
-                }
-                if (simLayer) {
-                    // פתיחת נעילה של שכבה Simulation אם היא נעולה
-                    if (simLayer.locked) {
-                        simLayer.locked = false;
-                    }
-                    // ניסיון למחוק שכבה בשם "information"
-                    try {
-                        var infoLayer = simLayer.layers.getByName("information");
-                        if (infoLayer) {
-                            // פתיחת נעילה אם השכבה נעולה
-                            if (infoLayer.locked) {
-                                infoLayer.locked = false;
-                            }
-                            // פתיחת נעילה של כל תתי-השכבות
-                            for (var j = 0; j < infoLayer.layers.length; j++) {
-                                try {
-                                    if (infoLayer.layers[j].locked) {
-                                        infoLayer.layers[j].locked = false;
-                                    }
-                                } catch(e) {}
-                            }
-                            infoLayer.remove();
-                            deletedCount++;
-                            found = true;
-                        }
-                    } catch(e) {}
-                    // ניסיון למחוק קבוצה בשם "information"
-                    try {
-                        var infoGroup = simLayer.groupItems.getByName("information");
-                        if (infoGroup) {
-                            // פתיחת נעילה אם הקבוצה נעולה
-                            if (infoGroup.locked) {
-                                infoGroup.locked = false;
-                            }
-                            // פתיחת נעילה של כל הפריטים בקבוצה
-                            for (var k = 0; k < infoGroup.pageItems.length; k++) {
-                                try {
-                                    if (infoGroup.pageItems[k].locked) {
-                                        infoGroup.pageItems[k].locked = false;
-                                    }
-                                } catch(e) {}
-                            }
-                            infoGroup.remove();
-                            deletedCount++;
-                            found = true;
-                        }
-                    } catch(e) {}
-                    // חיפוש רקורסיבי בתוך תתי-שכבות (אם יש Simulation בתוך Simulation)
-                    for (var l = 0; l < simLayer.layers.length; l++) {
-                        var subResult = deleteInfoFromSimulation(simLayer.layers[l]);
-                        if (subResult) found = true;
-                    }
-                }
-            } catch(e) {}
-            return found;
+
+
+JSX_SIMULATION_STACKING = r"""
+function orderSimulationLayers(container) {
+    for (var i = 0; i < container.layers.length; i++) {
+        var layer = container.layers[i];
+        if (layer.name === "Simulation") {
+            orderSimulationChildren(layer);
+        } else if (/^\d+$/.test(layer.name)) {
+            orderSimulationLayers(layer);
         }
-        try {
-            // גישה 1: חיפוש ישיר של Simulation במסמך (למוצר בודד)
-            try {
-                var directSim = doc.layers.getByName("Simulation");
-                if (directSim) {
-                    if (directSim.locked) directSim.locked = false;
-                    // ניסיון למחוק information ישירות
-                    try {
-                        var infoLayer = directSim.layers.getByName("information");
-                        if (infoLayer) {
-                            if (infoLayer.locked) infoLayer.locked = false;
-                            for (var j = 0; j < infoLayer.layers.length; j++) {
-                                try { if (infoLayer.layers[j].locked) infoLayer.layers[j].locked = false; } catch(e) {}
-                            }
-                            infoLayer.remove();
-                            deletedCount++;
-                        }
-                    } catch(e) {}
-                    try {
-                        var infoGroup = directSim.groupItems.getByName("information");
-                        if (infoGroup) {
-                            if (infoGroup.locked) infoGroup.locked = false;
-                            for (var k = 0; k < infoGroup.pageItems.length; k++) {
-                                try { if (infoGroup.pageItems[k].locked) infoGroup.pageItems[k].locked = false; } catch(e) {}
-                            }
-                            infoGroup.remove();
-                            deletedCount++;
-                        }
-                    } catch(e) {}
-                }
-            } catch(e) {}
-            // גישה 2: חיפוש דרך שכבות מוצרים (1, 2, 3, 4...) - למקרה של איחוד
-            for (var i = 0; i < doc.layers.length; i++) {
-                var mainLayer = doc.layers[i];
-                var layerName = mainLayer.name;
-                // בדיקה אם זו שכבה של מוצר (מספר)
-                if (/^\\d+$/.test(layerName)) {
-                    deleteInfoFromSimulation(mainLayer);
+    }
+}
+
+function orderSimulationChildren(layer) {
+    // Keep the indicated entries in front of the model and strings, whether
+    // they are sublayers or groups after sidebar processing.
+    var rank = {
+        Cover: 0,
+        Size_Front: 1, Size_Back: 1, size_Front: 1, size_Back: 1,
+        size_Right_Sleeve: 1, size_Left_Sleeve: 1,
+        Embroidery: 1, information: 1, Line: 1, type: 1, Type: 1,
+        Customer_Name: 1, Box_Color: 1, Number_Order: 1, NumberOrder: 1,
+        S_Placement_Left_Sleeve: 2, S_Placement_Right_Sleeve: 3,
+        S_Placement_Back: 4, S_Placement_Front: 5
+    };
+    var byRank = [[], [], [], [], [], []];
+    var collections = [layer.pageItems, layer.layers];
+    for (var c = 0; c < collections.length; c++) {
+        var items = collections[c];
+        for (var i = 0; i < items.length; i++) {
+            var item = items[i];
+            if (item.parent === layer && rank.hasOwnProperty(item.name)) {
+                byRank[rank[item.name]].push(item);
+            }
+        }
+    }
+
+    var layerLocked = layer.locked;
+    try {
+        layer.locked = false;
+        for (var r = byRank.length - 1; r >= 0; r--) {
+            for (var j = byRank[r].length - 1; j >= 0; j--) {
+                var entry = byRank[r][j];
+                var wasLocked = entry.locked;
+                try {
+                    entry.locked = false;
+                    entry.move(layer, ElementPlacement.PLACEATBEGINNING);
+                } finally {
+                    entry.locked = wasLocked;
                 }
             }
-        } catch(e) {}
-        // החזרת מספר הפריטים שנמחקו (לצורך log)
-        return deletedCount;
-    })();
-    """
-    try:
-        result = app.DoJavaScript(jsx_code)
-        deleted_count = int(result) if result else 0
-        if deleted_count > 0:
-            print(f"   ✓ נמחקו {deleted_count} שכבות/קבוצות 'information'")
-        else:
-            print(f"   ⚠ לא נמצאו שכבות/קבוצות 'information' למחיקה")
-    except Exception as e:
-        print(f"   ❌ שגיאה במחיקת שכבה 'information': {e}")
-def apply_extra_colors(app, extra_data_list: list):
-    import json
-    # וודאי שאין שימוש בשם hex_list אם הוא לא הוגדר
-    if not extra_data_list:
-        extra_data_list = []
-    formatted_rgb = []
-    for pair in extra_data_list:
-        rgb_pair = [list(hex_to_rgb(h)) for h in pair]
-        formatted_rgb.append(rgb_pair)
-    rgb_json = json.dumps(formatted_rgb)
-    final_jsx = JSX_EXTRA_COLORS.replace("%COLOR_ARRAY%", rgb_json)
-    run_jsx(app, final_jsx)
+        }
+    } finally {
+        layer.locked = layerLocked;
+    }
+}
+"""
+
+
+def order_simulation_layers(app):
+    run_jsx(app, JSX_SIMULATION_STACKING + "\norderSimulationLayers(app.activeDocument);")
+
+
+JSX_SIMULATION_DETAILS = r"""
+(function() {
+    var data = %SIMULATION_DATA%;
+    var simulation;
+    try { simulation = app.activeDocument.layers.getByName("Simulation"); } catch(e) { return; }
+
+    function rgb(values) {
+        var color = new RGBColor();
+        color.red = values[0];
+        color.green = values[1];
+        color.blue = values[2];
+        return color;
+    }
+
+    function setFill(item, values) {
+        unlockSimulationItem(item);
+        item.filled = true;
+        item.fillColor = rgb(values);
+    }
+
+    function styleProductSwatch(item, values) {
+        setFill(item, values);
+        item.stroked = true;
+        item.strokeColor = rgb([0, 0, 0]);
+        item.strokeWidth = 0.5;
+    }
+
+    function updateProductSwatches() {
+        var group = simulationItem(simulation, "Box_Color", "GroupItem", true);
+        if (!group) {
+            try { group = simulation.layers.getByName("Box_Color"); } catch(e) {}
+        }
+        if (!group) return false;
+        if (!data.extraColors.length) {
+            removeSimulationItem(group);
+            return false;
+        }
+        var populated = false;
+        // Old templates also have slots 20–24. Remove those unused swatches.
+        for (var i = 1; i <= 24; i++) {
+            var box = simulationItem(group, "Color_" + i, "PathItem", false);
+            if (!box) continue;
+            var colors = data.extraColors[i - 1];
+            if (!colors) {
+                removeSimulationItem(box);
+            } else if (colors.length === 1) {
+                styleProductSwatch(box, colors[0]);
+                populated = true;
+            } else {
+                unlockSimulationItem(box);
+                var b = box.geometricBounds;
+                var half = (b[2] - b[0]) / 2;
+                var height = b[1] - b[3];
+                styleProductSwatch(box.parent.pathItems.rectangle(b[1], b[0], half, height), colors[0]);
+                styleProductSwatch(box.parent.pathItems.rectangle(b[1], b[0] + half, half, height), colors[1]);
+                box.remove();
+                populated = true;
+            }
+        }
+        return populated;
+    }
+
+    function colorThreadNumber(thread, index, values) {
+        var label = String(index);
+        var number = simulationItem(thread, label, "TextFrame", false);
+        if (!number) {
+            for (var i = 0; i < thread.textFrames.length; i++) {
+                var field = thread.textFrames[i];
+                if (field.contents.replace(/^\s+|\s+$/g, "") === label) {
+                    number = field;
+                    break;
+                }
+            }
+        }
+        if (!number) return;
+        unlockSimulationItem(number);
+        var brightness = 0.299 * values[0] + 0.587 * values[1] + 0.114 * values[2];
+        var ink = brightness < 128 ? 255 : 0;
+        number.textRange.characterAttributes.fillColor = rgb([ink, ink, ink]);
+    }
+
+    function updateThreadSwatches() {
+        var group = simulationItem(simulation, "Embroidery", "GroupItem", true);
+        if (!group) return false;
+        if (!data.threadColors.length) {
+            removeSimulationItem(group);
+            return false;
+        }
+        var populated = false;
+        for (var i = 1; i <= 6; i++) {
+            var thread = simulationItem(group, "Embroidery_" + i, "GroupItem", true);
+            if (!thread) continue;
+            if (i > data.threadColors.length) {
+                removeSimulationItem(thread);
+                continue;
+            }
+            var swatch = simulationItem(thread, "Color_" + i, "PathItem", false);
+            if (swatch) {
+                var color = data.threadColors[i - 1];
+                setFill(swatch, color);
+                colorThreadNumber(thread, i, color);
+                populated = true;
+            }
+        }
+        return populated;
+    }
+
+    var orderGroup = simulationItem(simulation, "Number_Order", "GroupItem", true);
+    var orderField = simulationItem(orderGroup || simulation, "NumberOrder", "TextFrame", false);
+    if (data.orderNumber) {
+        simulation.visible = true;
+        if (!orderGroup && !orderField) {
+            unlockSimulationItem(simulation);
+            var rect = simulation.visibleBounds;
+            if (!rect || rect.length < 4) rect = [50, -50, 250, -100];
+            orderField = simulation.textFrames.add();
+            orderField.name = "NumberOrder";
+            orderField.position = [rect[0], rect[1] - 20];
+            orderField.textRange.characterAttributes.size = 14;
+        }
+        writeSimulationText(orderField, data.orderNumber);
+    }
+
+    var customer = simulationItem(simulation, "Customer_Name", "TextFrame", true);
+    writeSimulationText(customer, data.customerName);
+    var fabric = simulationItem(simulation, "type", "TextFrame", false) ||
+                 simulationItem(simulation, "Type", "TextFrame", false);
+    var hasFabric = !!(fabric && data.fabricType);
+    if (hasFabric) {
+        writeSimulationText(fabric, data.fabricType);
+    } else {
+        removeSimulationItem(fabric);
+    }
+    var hasExtraColors = updateProductSwatches();
+    var hasThreads = updateThreadSwatches();
+    var line = simulationItem(simulation, "Line", null, true);
+    if (!hasExtraColors && !hasThreads && !hasFabric) {
+        removeSimulationItem(line);
+    }
+})();
+"""
+
+
+def apply_simulation_details(
+    app, *, order_id, customer_name, fabric_type, extra_colors, thread_colors
+):
+    data = {
+        "orderNumber": str(order_id or ""),
+        "customerName": customer_name,
+        "fabricType": fabric_type,
+        "extraColors": [[hex_to_rgb(color) for color in pair] for pair in extra_colors[:19]],
+        "threadColors": [hex_to_rgb(color) for color in thread_colors[:6]],
+    }
+    script = JSX_SIMULATION_DETAILS.replace("%SIMULATION_DATA%", json.dumps(data))
+    run_jsx(app, JSX_SIMULATION_ITEMS + script)

@@ -66,7 +66,7 @@ def convert_pdf_to_png(pdf_path):
     except Exception as e:
         print(f"X Error converting PDF to PNG: {e}")
         return None
-def convert_to_svg(image_path, api_id, api_secret, retries=1):
+def convert_to_svg(image_path, api_id, api_secret, retries=1, *, production=False, use_cache=True):
     if not os.path.exists(image_path): return None
     # --- שלב 0: בדיקה אם הקובץ הוא כבר SVG ---
     if image_path.lower().endswith(".svg"):
@@ -83,7 +83,7 @@ def convert_to_svg(image_path, api_id, api_secret, retries=1):
     # --- שלב 1: בדיקת זיכרון (Cache) ---
     try:
         file_hash = get_file_hash(image_path)
-        cache = load_cache()
+        cache = load_cache() if use_cache else {}
         if file_hash in cache:
             existing_svg_path = cache[file_hash]
             # בדיקה אם קובץ ה-SVG הישן עדיין קיים במחשב
@@ -103,8 +103,8 @@ def convert_to_svg(image_path, api_id, api_secret, retries=1):
     # --- שלב 2: שליחה ל-API ---
     try:
         print(f"   -> Uploading {os.path.basename(image_path)}...")
-        api_data = {}
-        if IS_TEST_MODE:
+        api_data = {'mode': 'production', 'policy.retention_days': 0} if production else {}
+        if IS_TEST_MODE and not production:
             api_data['mode'] = 'test'
         with open(image_path, 'rb') as f:
             response = requests.post(
@@ -124,9 +124,10 @@ def convert_to_svg(image_path, api_id, api_secret, retries=1):
         print(f"   V SVG Saved -> {os.path.basename(output)}")
         # --- שלב 3: שמירה בזיכרון לעתיד ---
         try:
-            cache = load_cache()
-            cache[file_hash] = output
-            save_cache(cache)
+            if use_cache:
+                cache = load_cache()
+                cache[file_hash] = output
+                save_cache(cache)
         except Exception as e:
             print(f"Warning: Could not update cache: {e}")
         return output
@@ -134,5 +135,5 @@ def convert_to_svg(image_path, api_id, api_secret, retries=1):
         print(f"X convert_to_svg Error: {e}")
         if retries > 0:
             time.sleep(1)
-            return convert_to_svg(image_path, api_id, api_secret, retries-1)
+            return convert_to_svg(image_path, api_id, api_secret, retries-1, production=production, use_cache=use_cache)
         return None
