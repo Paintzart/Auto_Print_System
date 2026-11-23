@@ -31,6 +31,24 @@ if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR);
 // === הגדרת הפייתון (כדי למנוע שגיאות של ספריות חסרות) ===
 const venvPythonPath = path.join(__dirname, 'venv', 'Scripts', 'python.exe');
 const PYTHON_EXE = fs.existsSync(venvPythonPath) ? venvPythonPath : 'python';
+
+// Both workflows share one Illustrator session and use the active document.
+let adobeJobQueue = Promise.resolve();
+function runAdobePython(args, label) {
+    const job = adobeJobQueue.then(() => new Promise((resolve, reject) => {
+        const child = spawn(PYTHON_EXE, args, { cwd: __dirname });
+        child.stdout.on('data', (data) => console.log(`[${label}]: ${data}`));
+        child.stderr.on('data', (data) => console.error(`[${label} Error]: ${data}`));
+        child.once('error', reject);
+        child.once('close', (code, signal) => {
+            if (code === 0) resolve();
+            else reject(new Error(`Python process exited with ${signal || `code ${code}`}`));
+        });
+    }));
+    adobeJobQueue = job.catch(() => {});
+    return job;
+}
+
 // --- פונקציות עזר (R2) ---
 async function getR2SignedUrl(originalUrl) {
     try {
@@ -110,17 +128,16 @@ app.post('/prepare-print', async (req, res) => {
         const pythonArgs = [path.join(__dirname, 'prepare_print.py'), localFilePath, orderId, thickness];
         if (orderPayloadPath) pythonArgs.push(orderPayloadPath);
         console.log(`   [דיבוג] מריץ פייתון עם ${pythonArgs.length} ארגומנטים`);
-        // Pass arguments directly to Python. Using shell:true concatenates
-        // unescaped order data into a command line and triggers Node DEP0190.
-        const pythonProcess = spawn(PYTHON_EXE, pythonArgs, { cwd: __dirname });
-        pythonProcess.stdout.on('data', (data) => console.log(`[Python]: ${data}`));
-        pythonProcess.stderr.on('data', (data) => console.error(`[Error]: ${data}`));
-        pythonProcess.on('close', (code) => {
+        try {
+            await runAdobePython(pythonArgs, 'Print Python');
+            res.json({ success: true, message: fullPrintOnlyVal ? "קובץ ההדפסה המלא מוכן!" : "הקבצים מוכנים!" });
+        } catch (error) {
+            console.error("❌ שגיאה בהכנת הדפסה:", error.message);
+            res.status(500).json({ success: false, message: "עיבוד הפייתון נכשל" });
+        } finally {
             try { if (fs.existsSync(localFilePath)) fs.unlinkSync(localFilePath); } catch(e) {}
             try { if (orderPayloadPath && fs.existsSync(orderPayloadPath)) fs.unlinkSync(orderPayloadPath); } catch(e) {}
-            if (code === 0) res.json({ success: true, message: fullPrintOnlyVal ? "קובץ ההדפסה המלא מוכן!" : "הקבצים מוכנים!" });
-            else res.status(500).json({ success: false, message: "עיבוד הפייתון נכשל" });
-        });
+        }
     } catch (error) {
         console.error("❌ שגיאה בשרת:", error.message);
         res.status(500).json({ success: false, message: "תקלה" });
@@ -183,23 +200,8 @@ function maybeSaveLocationFile(loc, prefix) {
 
 // === פונקציית ההרצה (הישנה והטובה) ===
 function runSingleSimulation(payloadForPython) {
-    return new Promise((resolve, reject) => {
-        const pythonScriptPath = path.join(__dirname, 'main.py');
-        console.log(`   >> מריץ פייתון...`);
-        // שימוש בפייתון הנכון (VENV)
-        const pythonProcess = spawn(PYTHON_EXE, [pythonScriptPath, JSON.stringify(payloadForPython)]);
-        pythonProcess.stdout.on('data', (data) => console.log(`[Sim Python]: ${data}`));
-        pythonProcess.stderr.on('data', (data) => console.error(`[Sim Error]: ${data}`));
-        pythonProcess.on('close', (code) => {
-            if (code === 0) {
-                console.log("   V הסתיים בהצלחה");
-                resolve();
-            } else {
-                console.log("   X נכשל");
-                reject(new Error(`Python process exited with code ${code}`));
-            }
-        });
-    });
+    const pythonScriptPath = path.join(__dirname, 'main.py');
+    return runAdobePython([pythonScriptPath, JSON.stringify(payloadForPython)], 'Sim Python');
 }
 function isBlobUrl(value) {
     return typeof value === 'string' && value.startsWith('blob:');

@@ -5,6 +5,10 @@ import os
 import uuid
 import time
 import json
+import shutil
+import tempfile
+from contextlib import contextmanager
+from pathlib import Path
 from typing import Tuple, Optional
 # --- הגדרות גלובליות ---
 am = {
@@ -3420,15 +3424,138 @@ def delete_print_layer_only(app, prefix: str, *, keep_artboard: bool = False):
     }})();
     """
     run_jsx(app, jsx)
-def save_pdf(doc, path: str):
+JSX_SAVE_PRESS_QUALITY_PDF = r'''
+function savePressQualityPDF(doc, path, artboardRange) {
+    var output = new File(path);
+    var builtIn = "[Press Quality]";
+    var imported = "Auto Print System Press Quality";
+
+    function hasPreset(name) {
+        var presets = app.PDFPresetsList;
+        for (var i = 0; i < presets.length; i++) {
+            if (presets[i] === name) return true;
+        }
+        return false;
+    }
+
+    function saveWithPreset(preset) {
+        var options = new PDFSaveOptions();
+        options.pDFPreset = preset;
+        options.preserveEditability = true;
+        options.viewAfterSaving = false;
+        if (artboardRange) options.artboardRange = artboardRange;
+        doc.saveAs(output, options);
+        return preset;
+    }
+
+    var previousInteraction = app.userInteractionLevel;
+    app.userInteractionLevel = UserInteractionLevel.DONTDISPLAYALERTS;
+    try {
+        if (hasPreset(builtIn)) {
+            try {
+                return saveWithPreset(builtIn);
+            } catch (error) {
+                if (!/1129270854|CONF/.test(String(error))) throw error;
+                if (output.exists && !output.remove()) throw error;
+            }
+        }
+
+        if (!hasPreset(imported)) {
+            // Illustrator registers a custom preset under the joboptions basename.
+            // Import Adobe's settings under our own name to avoid localized names.
+            var settings = app.path.fsName + "/Support Files/Required/pdfsettings/settings/";
+            var source = new File(settings + "mul/settings/Press Quality.joboptions");
+            if (!source.exists) {
+                source = new File(settings + "japan/settings/Press Quality.joboptions");
+            }
+            if (!source.exists) {
+                throw new Error("Press Quality preset file is missing from Illustrator: " + settings);
+            }
+            var staging = new Folder(output.fsName + "-preset");
+            if (!staging.create()) throw new Error("Cannot stage the Press Quality preset: " + staging.fsName);
+            var alias = new File(staging.fsName + "/" + imported + ".joboptions");
+            try {
+                if (!source.copy(alias.fsName)) throw new Error("Cannot copy Press Quality preset: " + source.fsName);
+                var importDoc = app.documents.add(DocumentColorSpace.CMYK, 72, 72);
+                try {
+                    importDoc.importPDFPreset(alias, false);
+                } finally {
+                    importDoc.close(SaveOptions.DONOTSAVECHANGES);
+                }
+            } finally {
+                if (alias.exists) alias.remove();
+                staging.remove();
+            }
+            if (!hasPreset(imported)) throw new Error("Illustrator did not register the imported Press Quality preset");
+        }
+        return saveWithPreset(imported);
+    } finally {
+        app.userInteractionLevel = previousInteraction;
+    }
+}
+'''
+
+
+@contextmanager
+def stage_pdf(path):
+    """Export locally, validate the PDF, then replace the destination atomically."""
+    destination = Path(path).absolute()
+    local_pdf = Path(tempfile.gettempdir()) / f"auto-print-{uuid.uuid4().hex}.pdf"
     try:
-        o = win32com.client.Dispatch("Illustrator.PDFSaveOptions")
-        o.PDFPreset = "[Press Quality]"
-        o.PreserveEditability = True
-        doc.SaveAs(path, o)
+        yield local_pdf.as_posix()
+        import fitz
+
+        with fitz.open(local_pdf) as pdf:
+            if not pdf.is_pdf or pdf.is_repaired or not pdf.page_count:
+                raise RuntimeError(f"Adobe produced an invalid PDF for {destination.name}")
+
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        fd, publish_name = tempfile.mkstemp(prefix=".auto-print-", suffix=".tmp", dir=destination.parent)
+        os.close(fd)
+        publish_path = Path(publish_name)
+        try:
+            shutil.copyfile(local_pdf, publish_path)
+            for attempt in range(3):
+                try:
+                    os.replace(publish_path, destination)
+                    break
+                except PermissionError:
+                    if attempt == 2:
+                        raise
+                    time.sleep(0.4 * (attempt + 1))
+        finally:
+            publish_path.unlink(missing_ok=True)
     finally:
-        try: doc.Close(2)
-        except: pass
+        local_pdf.unlink(missing_ok=True)
+
+
+def save_pdf(doc, path: str, *, app=None):
+    """Save and close a document owned by the current Illustrator job."""
+    with stage_pdf(path) as staged_path:
+        try:
+            if app is None:
+                app = doc.Application
+            doc.Activate()
+            doc_path = json.dumps(Path(str(doc.FullName)).as_posix())
+            script = JSX_SAVE_PRESS_QUALITY_PDF + f'''
+                (function () {{
+                    var source = new File({doc_path}).fsName.toLowerCase();
+                    var target = app.activeDocument;
+                    if (target.fullName.fsName.toLowerCase() !== source) {{
+                        throw new Error("Illustrator did not activate the document to save: " + source);
+                    }}
+                    return savePressQualityPDF(target, {json.dumps(staged_path)});
+                }})();
+            '''
+            preset = app.DoJavaScript(script)
+        finally:
+            try:
+                doc.Close(2)
+            except Exception as close_error:
+                print(f"   > Could not close the Illustrator job document: {close_error}")
+    print(f"   > Illustrator PDF saved using {preset}")
+
+
 def outline_text_in_layers(app, layer_names: list) -> None:
     """הופך TextFrames בשכבות הנתונות ל-outline."""
     if not layer_names:

@@ -745,10 +745,9 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
     for fp in files_list:
         src = os.path.abspath(fp)
         base = os.path.basename(src)
-        if is_pdf_disguised_as_ai(src):
-            dst_name = base.replace(".ai", "_merge.pdf").replace(".AI", "_merge.pdf")
-            if dst_name == base:
-                dst_name = base + "_merge.pdf"
+        stem, extension = os.path.splitext(base)
+        if extension.lower() == ".ai" and is_pdf_disguised_as_ai(src):
+            dst_name = f"{stem}_merge.pdf"
             print(f"🔍 DEBUG: PDF-in-.ai detected — merge will open as {dst_name}")
         else:
             dst_name = base
@@ -808,8 +807,12 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
     function main() {{
         if (files.length === 0) return;
         app.userInteractionLevel = UserInteractionLevel.DONTDISPLAYALERTS;
-        var maxWidth = 0; var maxHeight = 0;
-        for (var i = 0; i < files.length; i++) {{
+        mergeStage = "opening master document";
+        var masterDoc = openFileSafe(files[0]);
+        var masterMetrics = calculateLayoutMetrics(masterDoc);
+        var maxWidth = masterMetrics.width;
+        var maxHeight = masterMetrics.height;
+        for (var i = 1; i < files.length; i++) {{
             mergeStage = "measuring input " + (i + 1);
             var tempDoc = openFileSafe(files[i]);
             var m = calculateLayoutMetrics(tempDoc);
@@ -823,9 +826,8 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
         var STEP_Y = maxHeight + GAP_Y;
         var COLS = {int(VARIABLE_PRINT_COLS)};
         $.writeln("Merge grid: " + files.length + " products, STEP_X=" + STEP_X + " STEP_Y=" + STEP_Y + " COLS=" + COLS);
-        mergeStage = "opening master document";
-        var masterDoc = openFileSafe(files[0]);
         mergeStage = "organizing master document";
+        masterDoc.activate();
         organizeMasterContent(masterDoc);
         for (var j = 1; j < files.length; j++) {{
             mergeStage = "merging input " + (j + 1);
@@ -962,8 +964,6 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
         for fp in files_list:
             if not os.path.exists(fp):
                 raise FileNotFoundError(f"Merge input missing: {fp}")
-            if is_pdf_disguised_as_ai(fp):
-                print(f"🔍 DEBUG: WARNING: {fp} is PDF-in-.ai — Illustrator open may fail")
             print(f"🔍 DEBUG: File OK: {fp} ({os.path.getsize(fp)} bytes)")
         app = win32com.client.Dispatch("Illustrator.Application")
         print(f"🔍 DEBUG: Illustrator app connected")
@@ -1003,7 +1003,16 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
                 "4 attempts. Restart Illustrator or repair its COM registration."
             ) from last_method_error
 
-        javascript_method(jsx_content)
+        try:
+            javascript_method(jsx_content)
+        except Exception as rpc_error:
+            if getattr(rpc_error, "hresult", None) not in (-2147023170, -2147023174, -2147417848):
+                raise
+            print(f"⚠️ DEBUG: Illustrator disconnected during merge, reconnecting once: {rpc_error}")
+            javascript_method = app = None
+            time.sleep(1)
+            app = win32com.client.Dispatch("Illustrator.Application")
+            app.DoJavaScript(jsx_content)
         print(f"🔍 DEBUG: JavaScript executed")
         documents = app.Documents
         master_path = os.path.normcase(os.path.abspath(js_files[0]))
@@ -1040,49 +1049,9 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
             except Exception as e:
                 print(f"⚠️ DEBUG: Error checking layers: {e}")
             final_path = os.path.abspath(output_pdf).replace("/", "\\")
-            output_dir = os.path.dirname(final_path)
-            if not output_dir:
-                raise ValueError(f"Invalid PDF output path: {output_pdf!r}")
-            os.makedirs(output_dir, exist_ok=True)
-
             print(f"💾 DEBUG: Saving PDF to: {final_path}")
-            last_save_error = None
-            for save_attempt in range(1, 4):
-                if os.path.exists(final_path):
-                    try:
-                        os.remove(final_path)
-                    except OSError as cleanup_error:
-                        raise RuntimeError(
-                            f"Cannot replace incomplete PDF {final_path}: {cleanup_error}"
-                        ) from last_save_error
-                try:
-                    # Every attempt uses the required preset. There is deliberately
-                    # no fallback to High Quality Print or default PDF settings.
-                    pdf_options = win32com.client.Dispatch("Illustrator.PDFSaveOptions")
-                    pdf_options.PDFPreset = "[Press Quality]"
-                    pdf_options.PreserveEditability = True
-                    doc.SaveAs(final_path, pdf_options)
-                    if os.path.isfile(final_path) and os.path.getsize(final_path) > 0:
-                        break
-                    raise RuntimeError("Illustrator returned without creating a valid PDF")
-                except Exception as save_error:
-                    last_save_error = save_error
-                    if save_attempt == 3:
-                        raise RuntimeError(
-                            "Illustrator could not save the merged PDF with "
-                            f"[Press Quality] after 3 attempts: {save_error}"
-                        ) from save_error
-                    print(
-                        "⚠️ DEBUG: Press Quality PDF save failed "
-                        f"(attempt {save_attempt}/3); cleaning and retrying: {save_error}"
-                    )
-                    time.sleep(0.75 * save_attempt)
-
-            if not os.path.isfile(final_path) or os.path.getsize(final_path) == 0:
-                raise RuntimeError(f"Illustrator reported success but PDF is missing or empty: {final_path}")
+            save_pdf(doc, final_path, app=app)
             print(f"✅ DEBUG: PDF saved successfully")
-            doc.Close(2)
-            print(f"✅ DEBUG: Document closed")
             return True
         raise RuntimeError(f"Illustrator merge completed without the expected document: {master_path}")
     except Exception as e:

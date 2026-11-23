@@ -7,8 +7,11 @@ import time
 import json
 import pythoncom
 import shutil
+import tempfile
+import uuid
+from pathlib import Path
 from urllib.parse import urlencode
-from illustrator_ops import JSX_SIMULATION_ITEMS
+from illustrator_ops import JSX_SAVE_PRESS_QUALITY_PDF, JSX_SIMULATION_ITEMS, open_illustrator_document, save_pdf, stage_pdf
 # הגדרת קידוד לקונסול כדי לתמוך בעברית ונתיבים
 sys.stdout.reconfigure(encoding='utf-8')
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -102,7 +105,7 @@ function applyNumOrderSidebar(doc, mode, targetArtboardIndex) {
 # יצירת קובץ סיכום הדמיות (הגרסה הסופית: Manual Grouping לשמירה על שכבות)
 JSX_CREATE_SIM_SUMMARY = r'''
 #target illustrator
-''' + JSX_APPLY_NUMORDER_HELPER + r'''
+''' + JSX_SAVE_PRESS_QUALITY_PDF + JSX_APPLY_NUMORDER_HELPER + r'''
 function createSimSummary() {
     var sourceDoc = app.activeDocument;
     var savePath = SAVE_PATH;
@@ -130,7 +133,7 @@ function createSimSummary() {
         }
     }
     simLayersData.sort(function(a, b) { return a.id - b.id; });
-    if (simLayersData.length === 0) return;
+    if (simLayersData.length === 0) throw new Error("No simulation layers contain artwork");
     // --- מקרה 1: הדמיה אחת ---
     if (simLayersData.length === 1) {
         var tempG = manualGroup(simLayersData[0].layer);
@@ -142,12 +145,7 @@ function createSimSummary() {
             }
         }
         applyNumOrderSidebar(sourceDoc, "side", targetAbIdx);
-        var opts = new PDFSaveOptions();
-        opts.presetFile = "[Press Quality]";
-        opts.artboardRange = (targetAbIdx + 1).toString();
-        sourceDoc.saveAs(new File(savePath), opts);
-        sourceDoc.close(SaveOptions.DONOTSAVECHANGES);
-        return;
+        return savePressQualityPDF(sourceDoc, savePath, (targetAbIdx + 1).toString());
     }
     // --- מקרה 2: ריבוי הדמיות ---
     var A4_W = 595.28;
@@ -156,6 +154,13 @@ function createSimSummary() {
     var docW = isLandscape ? A4_H : A4_W;
     var docH = isLandscape ? A4_W : A4_H;
     var targetDoc = app.documents.add(DocumentColorSpace.CMYK, docW, docH);
+    try {
+        return saveCombinedSimulation(targetDoc, simLayersData, isLandscape, savePath);
+    } finally {
+        targetDoc.close(SaveOptions.DONOTSAVECHANGES);
+    }
+}
+function saveCombinedSimulation(targetDoc, simLayersData, isLandscape, savePath) {
     var baseRect = targetDoc.artboards[0].artboardRect;
     var abW = baseRect[2] - baseRect[0];
     var abH = baseRect[1] - baseRect[3];
@@ -188,18 +193,14 @@ function createSimSummary() {
             var tempGroup = manualGroup(currentData.layer);
             var targetGroup = tempGroup.duplicate(targetDoc.activeLayer, ElementPlacement.PLACEATEND);
             if (targetGroup) {
-                app.activeDocument = targetDoc;
+                targetDoc.activate();
                 placeSimOnPage(targetGroup, abRect, onPage, s, isLandscape, margin);
             }
         }
     }
     // 3/4 בעמוד כמו קודם, אבל מספר הזמנה לימין (כמו הדמיה אחת). רק 2 → מספר למטה.
     applyNumOrderSidebar(targetDoc, isLandscape ? "side" : "bottom");
-    var saveOpts = new PDFSaveOptions();
-    saveOpts.presetFile = "[Press Quality]";
-    targetDoc.saveAs(new File(savePath), saveOpts);
-    targetDoc.close(SaveOptions.DONOTSAVECHANGES);
-    sourceDoc.close(SaveOptions.DONOTSAVECHANGES);
+    return savePressQualityPDF(targetDoc, savePath);
 }
 function slotsForSimCount(count) {
     if (count === 1) return [{col: 0, row: 0, cols: 1, rows: 1}];
@@ -511,11 +512,12 @@ checkDoubleCondition();
 # צביעת הגרפיקה בלבן נקי (CMYK 0,0,0,0)
 JSX_CREATE_PRINT_FROM_SCRATCH = r"""
 #target illustrator
-""" + JSX_APPLY_NUMORDER_HELPER + r"""
+""" + JSX_SAVE_PRESS_QUALITY_PDF + JSX_APPLY_NUMORDER_HELPER + r"""
 // יצירת קובץ Print מאפס עבור מוצר 1 בלבד
 function createPrintFromScratch() {
     var sourceDoc = app.activeDocument;
     var savePath = SAVE_PATH;
+    var newDoc = null;
     try {
         // בדיקה אם יש רק מוצר 1
         var product1Layer = null;
@@ -544,7 +546,7 @@ function createPrintFromScratch() {
         var A4_H = 595.28;  // גובה A4 לרוחב בפוינטים
         var margin = 20;    // שוליים
         // יצירת מסמך חדש בגודל A4 לרוחב
-        var newDoc = app.documents.add(DocumentColorSpace.CMYK, A4_W, A4_H);
+        newDoc = app.documents.add(DocumentColorSpace.CMYK, A4_W, A4_H);
         // הגדרת הארטבורד ל-A4
         var abRect = newDoc.artboards[0].artboardRect;
         var abLeft = abRect[0];
@@ -571,15 +573,14 @@ function createPrintFromScratch() {
             abCenterY + (newGroup.height / 2)
         ];
         applyNumOrderSidebar(newDoc, "side");
-        // שמירה
-        var pdfOpts = new PDFSaveOptions();
-        pdfOpts.presetFile = "[Press Quality]";
-        newDoc.saveAs(new File(savePath), pdfOpts);
-        newDoc.close(SaveOptions.DONOTSAVECHANGES);
-        sourceDoc.close(SaveOptions.DONOTSAVECHANGES);
-        return "SUCCESS";
     } catch(e) {
+        if (newDoc) newDoc.close(SaveOptions.DONOTSAVECHANGES);
         return "ERROR: " + e.message;
+    }
+    try {
+        return savePressQualityPDF(newDoc, savePath);
+    } finally {
+        newDoc.close(SaveOptions.DONOTSAVECHANGES);
     }
 }
 function manualGroup(layerObj) {
@@ -1064,8 +1065,7 @@ function main() {
         doc.selection.deselect();
         var saveFile = new File(savePath);
         var saved = false;
-        // This Photoshop stage prepares the PDF for DTF. The required output is
-        // the Spot1 channel; Illustrator already created the source as Press Quality.
+        // Spot1 is required for the DTF output.
         var lastSaveError = "unknown error";
         for (var saveAttempt = 1; saveAttempt <= 3 && !saved; saveAttempt++) {
             try {
@@ -1074,6 +1074,9 @@ function main() {
                 opts1.alphaChannels = true;
                 opts1.spotColors = true;
                 opts1.layers = true;
+                opts1.preserveEditing = true;
+                opts1.downSample = PDFResample.NONE;
+                opts1.encoding = PDFEncoding.PDFZIP;
                 doc.saveAs(saveFile, opts1, true); saved = true;
             } catch(saveError) {
                 lastSaveError = saveError.message;
@@ -1102,27 +1105,6 @@ main();
 # ========================================================
 # 2. פונקציות ניהול (Python)
 # ========================================================
-def remove_existing_output(path, attempts=4):
-    """Remove an old/partial output, including files briefly locked by sync tools."""
-    if not os.path.exists(path):
-        return
-
-    last_error = None
-    for attempt in range(1, attempts + 1):
-        try:
-            os.remove(path)
-            if not os.path.exists(path):
-                return
-        except OSError as exc:
-            last_error = exc
-        if attempt < attempts:
-            time.sleep(0.4 * attempt)
-
-    raise RuntimeError(
-        f"Cannot replace existing output file (it may be open or locked): {path}"
-    ) from last_error
-
-
 def close_matching_adobe_documents(path, illustrator_app=None):
     """Close only the generated PDF matching path if Adobe still holds it open."""
     target = os.path.normcase(os.path.abspath(path))
@@ -1153,90 +1135,12 @@ def close_matching_adobe_documents(path, illustrator_app=None):
     time.sleep(0.5)
 
 
-def save_print_pdf_with_retry(app, doc, output_path, attempts=3):
-    """Save through Illustrator's own JavaScript engine using Press Quality."""
-    try:
-        preset_text = app.DoJavaScript(
-            '(function () { return app.PDFPresetsList.join("\\n"); }())'
-        )
-        available_presets = [p.strip() for p in str(preset_text).splitlines() if p.strip()]
-        print(f"   > Illustrator PDF presets: {available_presets}")
-        if "[Press Quality]" not in available_presets:
-            # Some Illustrator builds expose only Illustrator Default through
-            # PDFPresetsList even though the full preset list is visible in the
-            # UI. Do not reject a valid UI preset before actually trying it.
-            print(
-                "   > Warning: [Press Quality] was not exposed by the scripting "
-                "preset list; attempting the required preset directly."
-            )
-    except Exception as preset_error:
-        print(f"   > Could not read Illustrator PDF preset list: {preset_error}")
-
-    last_error = None
-    for attempt in range(1, attempts + 1):
-        remove_existing_output(output_path)
-        try:
-            doc.Activate()
-            jsx_output_path = json.dumps(
-                os.path.abspath(output_path).replace("\\", "/"), ensure_ascii=False
-            )
-            save_script = f'''(function () {{
-                var outputFile = new File({jsx_output_path});
-                if (outputFile.exists && !outputFile.remove()) {{
-                    throw new Error("Cannot remove existing output: " + outputFile.fsName);
-                }}
-                var options = new PDFSaveOptions();
-                options.pDFPreset = "[Press Quality]";
-                options.preserveEditability = true;
-                app.activeDocument.saveAs(outputFile, options);
-                return "PRESS_QUALITY_SAVE_OK";
-            }}())'''
-            save_result = app.DoJavaScript(save_script)
-            if str(save_result) != "PRESS_QUALITY_SAVE_OK":
-                raise RuntimeError(f"Unexpected Illustrator save result: {save_result!r}")
-            if not os.path.isfile(output_path) or os.path.getsize(output_path) == 0:
-                raise RuntimeError("Illustrator returned without creating a valid PDF")
-            return
-        except Exception as exc:
-            last_error = exc
-            # A failed SaveAs can leave a partial PDF.  Leaving it in place makes
-            # the next COM SaveAs request overwrite confirmation (error CONF).
-            try:
-                remove_existing_output(output_path)
-            except Exception as cleanup_error:
-                raise RuntimeError(
-                    f"PDF save failed and its partial output could not be removed: "
-                    f"{output_path}: {cleanup_error}"
-                ) from exc
-            if attempt < attempts:
-                print(
-                    f"   > PDF save failed (attempt {attempt}/{attempts}); "
-                    f"cleaning partial output and retrying: {exc}"
-                )
-                time.sleep(0.75 * attempt)
-
-    raise RuntimeError(
-        f"Illustrator could not save {os.path.basename(output_path)} after "
-        f"{attempts} attempts: {last_error}"
-    ) from last_error
-
-
 def run_illustrator_split(source_file_path, order_number, output_folder, order_payload_path=None):
     """מבצע פיצול חכם לפי מוצרים (1, 2...) ולפי שכבות הדפסה"""
     files_created = []
     pythoncom.CoInitialize()
-    try:
-        app = win32com.client.Dispatch("Illustrator.Application")
-    except:
-        print("Error: Could not connect to Illustrator.")
-        return []
-    app.UserInteractionLevel = -1
     print(f"Opening Master File: {os.path.basename(source_file_path)}")
-    try:
-        master_doc = app.Open(source_file_path)
-    except:
-        print("Error opening file.")
-        return []
+    master_doc, app = open_illustrator_document(source_file_path)
     # --- טעינת דגל הדפס קידמי 2Pocket (מהפיילוד) ---
     front_print_2pocket = False
     if order_payload_path and os.path.exists(order_payload_path):
@@ -1372,20 +1276,19 @@ def run_illustrator_split(source_file_path, order_number, output_folder, order_p
             base_name = f"{base_name}({qty})"
         final_pdf_name = f"{base_name}.pdf"
         final_pdf_path = os.path.join(output_folder, final_pdf_name)
-        # === שינוי לדריסה: מחיקת קובץ קיים במקום יצירת עותק ===
-        close_matching_adobe_documents(final_pdf_path, app)
-        remove_existing_output(final_pdf_path)
-        # ======================================================
+        editable_pdf_path = os.path.join(output_folder, "Editable", final_pdf_name)
+        for output_path in (editable_pdf_path, final_pdf_path):
+            if os.path.exists(output_path):
+                close_matching_adobe_documents(output_path, app)
         # Preserve the source format. Renaming PDF bytes to .ai can open in
         # Illustrator but later fail on SaveAs with the opaque CONF error.
         source_ext = os.path.splitext(source_file_path)[1].lower()
         if source_ext not in (".pdf", ".ai"):
             source_ext = ".pdf"
-        temp_work_path = os.path.join(output_folder, f"temp_work{source_ext}")
-        remove_existing_output(temp_work_path)
-        shutil.copyfile(source_file_path, temp_work_path)
+        temp_work_path = os.path.join(tempfile.gettempdir(), f"auto-print-work-{uuid.uuid4().hex}{source_ext}")
         try:
-            work_doc = app.Open(temp_work_path)
+            shutil.copyfile(source_file_path, temp_work_path)
+            work_doc, app = open_illustrator_document(temp_work_path)
             app.DoJavaScript(JSX_REMOVE_PRINT_SIMULATION_DETAILS)
             # צביעה ללבן: רק אם הרשימה ריקה – זיהוי אוטומטי (שחור בהדפסה + לבן בהדמיה). אם יש רשימה – צובעים רק את מה שברשימה, בלי שום בדיקה.
             try:
@@ -1448,14 +1351,15 @@ def run_illustrator_split(source_file_path, order_number, output_folder, order_p
                     print(f"   > A4 לרוחב (2Pocket) הוחל")
                 except Exception as e:
                     print(f"   > אזהרה: שינוי A4 לרוחב נכשל: {e}")
-            save_print_pdf_with_retry(app, work_doc, final_pdf_path)
-            work_doc.Close(2)
+            document_to_save, work_doc = work_doc, None
+            save_pdf(document_to_save, editable_pdf_path, app=app)
             files_created.append({
-                "path": final_pdf_path,
+                "path": editable_pdf_path,
+                "output_path": final_pdf_path,
                 "prod_idx": str(job["prod_idx"]),
                 "suffix": job["suffix"],
             })
-            print(f"   > Created: {final_pdf_name}")
+            print(f"   > Created editable copy: {editable_pdf_path}")
         except Exception as e:
             print(f"Error processing job: {e}")
             failed_jobs.append(f"{job['prod_idx']}:{job['suffix']} ({e})")
@@ -1473,7 +1377,6 @@ def run_illustrator_split(source_file_path, order_number, output_folder, order_p
     return files_created
 def run_photoshop_processing(files_list, default_contract_px, thickness_map=None):
     pythoncom.CoInitialize()
-    ps = None
     max_attempts = 5
     delay_seconds = 3
     for attempt in range(1, max_attempts + 1):
@@ -1485,100 +1388,59 @@ def run_photoshop_processing(files_list, default_contract_px, thickness_map=None
                 print(f"   ניסיון {attempt}/{max_attempts}: חיבור ל-Photoshop נכשל, ממתין {delay_seconds} שניות...")
                 time.sleep(delay_seconds)
             else:
-                print(f"Error connecting to Photoshop: {e}")
-                print("")
-                print("  טיפים:")
-                print("  • פתח את Photoshop ידנית לפני לחיצה על הכפתור (ורד/ורוד).")
-                print("  • המתן עד שהחלון של Photoshop נטען לגמרי ואז הרץ שוב.")
-                print("  • אם השגיאה חוזרת: הפעל את Select Graphic Automation Server כמנהל (Run as administrator).")
-                print("")
-                return
-    if ps is None:
-        return
+                raise RuntimeError("Could not connect to Photoshop for DTF processing") from e
     thickness_map = thickness_map or {}
+    failures = []
     for entry in files_list:
         if isinstance(entry, dict):
-            file_path = entry["path"]
+            source_path = entry["path"]
+            output_path = entry.get("output_path", source_path)
             prod_idx = str(entry.get("prod_idx", "1"))
             suffix = entry.get("suffix", "")
             contract_px = thickness_map.get((prod_idx, suffix), default_contract_px)
         else:
-            file_path = entry
+            source_path = output_path = entry
             contract_px = default_contract_px
-        # וידוא שהנתיב תקין עבור ווינדוס
-        abs_path = os.path.abspath(file_path).replace("\\", "/")
-        status_path = abs_path + ".status.txt"
-        photoshop_output_path = abs_path + ".photoshop-temp.pdf"
-        for stale_path in (status_path, photoshop_output_path):
-            if os.path.exists(stale_path):
-                try:
-                    os.remove(stale_path)
-                except OSError:
-                    pass
-        # עדכון ה-JSX עם נתיבים נקיים לחלוטין
-        jsx_code = (
-            JSX_PS_TEMPLATE
-            .replace("FILE_PATH", json.dumps(abs_path))
-            # Photoshop must not overwrite the PDF that it currently has open.
-            .replace("SAVE_PATH", json.dumps(photoshop_output_path))
-            .replace("STATUS_PATH", json.dumps(status_path))
-            .replace("CONTRACT_PX", str(contract_px))
-        )
-        jsx_file = os.path.join(os.path.dirname(file_path), "temp_ps_runner.jsx")
-        with open(jsx_file, "w", encoding="utf-8") as f:
-            f.write(jsx_code)
-        px_label = f" ({contract_px}px)" if thickness_map else ""
-        print(f"Sending to Photoshop: {os.path.basename(file_path)}{px_label}")
+        print(f"Sending to Photoshop: {os.path.basename(source_path)} ({contract_px}px)")
         try:
-            ps.DoJavaScript(f'$.evalFile("{jsx_file.replace(os.sep, "/")}")')
-        except Exception as photoshop_error:
-            print(f"❌ Photoshop script error: {photoshop_error}")
-        # המתנה לסיום (הגדלתי את זמן ההמתנה ל-30 שניות)
-        success = False
-        status_result = "TIMEOUT: Photoshop did not create a status file"
-        for _ in range(300):
-            if os.path.exists(status_path):
+            with stage_pdf(output_path) as staged_path:
+                status_path = Path(staged_path + ".status.txt")
+                jsx_file = Path(staged_path + ".jsx")
+                jsx_code = (
+                    JSX_PS_TEMPLATE
+                    .replace("FILE_PATH", json.dumps(Path(source_path).absolute().as_posix()))
+                    .replace("SAVE_PATH", json.dumps(staged_path))
+                    .replace("STATUS_PATH", json.dumps(status_path.as_posix()))
+                    .replace("CONTRACT_PX", str(contract_px))
+                )
                 try:
-                    with open(status_path, "r", encoding="utf-8") as f:
-                        status_result = f.read().strip()
-                        success = status_result.startswith("SUCCESS")
-                    os.remove(status_path)
-                except Exception as status_error:
-                    status_result = f"Could not read Photoshop status: {status_error}"
-                break
-            time.sleep(0.1)
-        if success and os.path.isfile(photoshop_output_path) and os.path.getsize(photoshop_output_path) > 0:
-            os.replace(photoshop_output_path, abs_path)
-            print(f"✅ Photoshop Saved: {os.path.basename(file_path)}")
-        else:
-            success = False
-            print(
-                f"❌ Photoshop Failed to save: {os.path.basename(file_path)}; "
-                f"details: {status_result}"
-            )
-            if os.path.exists(photoshop_output_path):
-                try:
-                    os.remove(photoshop_output_path)
-                except OSError:
-                    pass
-        if os.path.exists(jsx_file): os.remove(jsx_file)
+                    jsx_file.write_text(jsx_code, encoding="utf-8")
+                    ps.DoJavaScript(f'$.evalFile(new File({json.dumps(jsx_file.as_posix())}))')
+                    for _ in range(300):
+                        if status_path.is_file():
+                            break
+                        time.sleep(0.1)
+                    if not status_path.is_file():
+                        raise RuntimeError("Photoshop did not report a result within 30 seconds")
+                    status = status_path.read_text(encoding="utf-8").strip()
+                    if status != "SUCCESS":
+                        raise RuntimeError(status)
+                finally:
+                    jsx_file.unlink(missing_ok=True)
+                    status_path.unlink(missing_ok=True)
+            print(f"✅ Photoshop saved: {os.path.basename(output_path)}")
+        except Exception as error:
+            failures.append(f"{os.path.basename(output_path)} ({error})")
+    if failures:
+        raise RuntimeError("Photoshop could not prepare DTF files: " + "; ".join(failures))
 # ========================================================
 def create_simulation_summary_file(source_file_path, order_number, output_folder):
     """יוצר קובץ PDF מסכם של ההדמיות + Sidebar_NumOrder עם 4 ספרות אחרונות"""
     pythoncom.CoInitialize()
     qr_paths = {}
-    try:
-        app = win32com.client.Dispatch("Illustrator.Application")
-    except:
-        return
     last_4 = str(order_number)[-4:]
     final_pdf_name = f"{last_4}_print.pdf"
     final_pdf_path = os.path.join(output_folder, final_pdf_name)
-    # === דריסה אם קיים ===
-    if os.path.exists(final_pdf_path):
-        try: os.remove(final_pdf_path)
-        except: pass
-    js_save_path = os.path.abspath(final_pdf_path).replace("\\", "/")
     print(f">> Generating Simulation Summary: {final_pdf_name}")
 
     # Sidebar_NumOrder — מתיקיית Simulations ליד הקוד (כמו שאר ההדמיות)
@@ -1611,59 +1473,39 @@ def create_simulation_summary_file(source_file_path, order_number, output_folder
     except Exception as e:
         print(f"   ⚠ Could not update current_job.json for NumOrder: {e}")
 
-    def inject_numorder(script: str) -> str:
+    def inject_numorder(script, save_path):
         return (
             script
-            .replace("SAVE_PATH", json.dumps(js_save_path))
+            .replace("SAVE_PATH", json.dumps(save_path))
             .replace("ORDER_LAST4", json.dumps(last_4))
             .replace("SIDEBAR_NUMORDER_SCRIPT", json.dumps(sidebar_numorder_script))
             .replace("SIDEBAR_NUMORDER_PATH", json.dumps(sidebar_numorder_path))
         )
 
-    # בדיקה אם יש רק מוצר 1
-    is_only_product_1 = False
     try:
-        temp_doc = app.Open(source_file_path)
-        product_count = 0
-        has_product_1 = False
-        for layer in temp_doc.Layers:
-            if layer.Name.strip().isdigit():
-                product_count += 1
-                if layer.Name.strip() == "1":
-                    has_product_1 = True
-        temp_doc.Close(2)
-        is_only_product_1 = (product_count == 1 and has_product_1)
-    except:
-        pass
-    try:
-        source_doc = app.Open(source_file_path)
-        try:
-            app.DoJavaScript(JSX_REMOVE_PRINT_SIMULATION_DETAILS)
-        except Exception:
-            source_doc.Close(2)
-            raise
-        if is_only_product_1:
-            # יצירת הקובץ מאפס עבור מוצר 1 בלבד
-            print(f"   > Creating Print file from scratch for Product 1 only...")
-            print(f"   > Adding NumOrder sidebar ({last_4})...")
-            script_to_run = inject_numorder(JSX_CREATE_PRINT_FROM_SCRATCH)
-            result = app.DoJavaScript(script_to_run)
-            if "SUCCESS" in str(result):
-                print(f"   > Created Summary: {final_pdf_name}")
-            else:
-                print(f"   > Error creating from scratch: {result}")
-                # נסיון עם הלוגיקה הרגילה
-                script_to_run = inject_numorder(JSX_CREATE_SIM_SUMMARY)
-                app.DoJavaScript(script_to_run)
-                print(f"   > Created Summary (fallback): {final_pdf_name}")
-        else:
-            # לוגיקה רגילה - עבור מספר מוצרים
-            print(f"   > Adding NumOrder sidebar ({last_4})...")
-            script_to_run = inject_numorder(JSX_CREATE_SIM_SUMMARY)
-            app.DoJavaScript(script_to_run)
-            print(f"   > Created Summary: {final_pdf_name}")
-    except Exception as e:
-        print(f"   Error creating summary: {e}")
+        with stage_pdf(final_pdf_path) as save_path:
+            source_doc, app = open_illustrator_document(source_file_path)
+            try:
+                if os.path.exists(final_pdf_path):
+                    close_matching_adobe_documents(final_pdf_path, app)
+                    source_doc.Activate()
+                product_layers = [layer.Name.strip() for layer in source_doc.Layers if layer.Name.strip().isdigit()]
+                app.DoJavaScript(JSX_REMOVE_PRINT_SIMULATION_DETAILS)
+                if product_layers == ["1"]:
+                    preset = app.DoJavaScript(inject_numorder(JSX_CREATE_PRINT_FROM_SCRATCH, save_path))
+                    if str(preset).startswith("ERROR:"):
+                        print(f"   > Could not lay out Product 1 from scratch: {preset}")
+                        source_doc.Close(2)
+                        source_doc = None
+                        source_doc, app = open_illustrator_document(source_file_path)
+                        app.DoJavaScript(JSX_REMOVE_PRINT_SIMULATION_DETAILS)
+                        preset = app.DoJavaScript(inject_numorder(JSX_CREATE_SIM_SUMMARY, save_path))
+                else:
+                    preset = app.DoJavaScript(inject_numorder(JSX_CREATE_SIM_SUMMARY, save_path))
+            finally:
+                if source_doc is not None:
+                    source_doc.Close(2)
+        print(f"   > Created Summary: {final_pdf_name} using {preset}")
     finally:
         remove_temporary_qr_images(qr_paths)
 # 3. נקודת כניסה ראשית
