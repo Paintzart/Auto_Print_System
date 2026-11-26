@@ -781,17 +781,21 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
             return head && String(head).indexOf("%PDF") === 0;
         }} catch(e) {{ return false; }}
     }}
+    function findOpenMergeDocument(f) {{
+        var target = f.fsName.toLowerCase();
+        for (var d = 0; d < app.documents.length; d++) {{
+            var doc = app.documents[d];
+            try {{
+                if (doc.fullName.fsName.toLowerCase() === target) return doc;
+            }} catch(e) {{}}
+        }}
+        return null;
+    }}
     function openFileSafe(path) {{
         var f = new File(path);
         if (!f.exists) throw new Error("File not found: " + path);
-        var target = f.fsName.toLowerCase();
-        for (var d = 0; d < app.documents.length; d++) {{
-            try {{
-                if (app.documents[d].fullName && app.documents[d].fullName.fsName.toLowerCase() === target) {{
-                    return app.documents[d];
-                }}
-            }} catch(e) {{}}
-        }}
+        var openDoc = findOpenMergeDocument(f);
+        if (openDoc) return openDoc;
         var isPdf = fileLooksLikePdf(f);
         for (var attempt = 0; attempt < 3; attempt++) {{
             try {{
@@ -861,6 +865,11 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
         }} else {{
             $.writeln("Sidebar skipped (showSidebar=" + showSidebar + ", alreadyApplied=" + sidebarAlreadyApplied + ", hasLayer=" + docHasSidebarLayer(masterDoc) + ", sourceLoaded=" + (sidebarSource !== null) + ")");
         }}
+        mergeStage = "reactivating the master document";
+        // Opening and closing the sidebar template can invalidate the earlier document reference.
+        masterDoc = findOpenMergeDocument(new File(files[0]));
+        if (!masterDoc) throw new Error("The merged document is no longer open: " + files[0]);
+        masterDoc.activate();
         mergeStage = "ordering simulation layers";
         orderSimulationLayers(masterDoc);
         mergeStage = "reordering artboards";

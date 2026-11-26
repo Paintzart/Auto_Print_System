@@ -181,6 +181,7 @@ function addSimulationSidebar(targetDoc) {
     $.writeln("Number of artboards: " + pdfDoc.artboards.length);
     var abRect = pdfDoc.artboards[0].artboardRect;
     $.writeln("First artboard rect: " + abRect.toString());
+    var sidebarFile = new File(sidebarMasterPath);
     var sbDoc = null;
     try {
         pdfDoc.activate();
@@ -214,10 +215,13 @@ function addSimulationSidebar(targetDoc) {
         $.writeln("Selected products: " + selected.join(", "));
         $.writeln("--- Step 6: Opening sidebar template ---");
         $.writeln("Sidebar template path: " + sidebarMasterPath);
-        sbDoc = app.open(new File(sidebarMasterPath));
+        sbDoc = app.open(sidebarFile);
         $.writeln("Sidebar template opened: " + sbDoc.name);
         $.writeln("--- Step 7: Setting RGB color mode ---");
-        app.executeMenuCommand('doc-color-rgb');
+        sbDoc.activate();
+        if (sbDoc.documentColorSpace !== DocumentColorSpace.RGB) {
+            app.executeMenuCommand('doc-color-rgb');
+        }
         $.writeln("--- Step 8: Getting sidebar layers ---");
         var sbLayer = sbDoc.layers.getByName("Sidebar");
         $.writeln("Sidebar layer found: " + (sbLayer ? "YES" : "NO"));
@@ -275,15 +279,6 @@ function addSimulationSidebar(targetDoc) {
         var pastedBar = finalBar.duplicate(sidebarFinalLayer, ElementPlacement.PLACEATBEGINNING);
         $.writeln("Sidebar copied directly! Type: " + pastedBar.typename);
         
-        $.writeln("--- Step 16: Closing sidebar template ---");
-        sbDoc.close(SaveOptions.DONOTSAVECHANGES);
-        sbDoc = null;
-        $.writeln("Sidebar template closed");
-        
-        // וידוא שהמסמך הראשי עדיין פעיל
-        pdfDoc.activate();
-        app.redraw();
-        $.writeln("Target document: " + pdfDoc.name);
         $.writeln("--- Step 19: Positioning sidebar ---");
         pastedBar.left = abRect[0];
         pastedBar.top = abRect[1] - (Math.abs(abRect[1] - abRect[3]) - pastedBar.height) / 2;
@@ -351,7 +346,12 @@ function addSimulationSidebar(targetDoc) {
     } finally {
         if (sbDoc) {
             try {
-                sbDoc.close(SaveOptions.DONOTSAVECHANGES);
+                sbDoc.activate();
+                var activeTemplate = app.activeDocument;
+                if (activeTemplate.fullName.fsName.toLowerCase() !== sidebarFile.fsName.toLowerCase()) {
+                    throw new Error("Could not activate the sidebar template: " + sidebarFile.fsName);
+                }
+                activeTemplate.close(SaveOptions.DONOTSAVECHANGES);
             } catch (err) {
                 $.writeln("Error closing sidebar template: " + err.toString());
             }
