@@ -1,22 +1,29 @@
 #target illustrator
 // --- פונקציה לקריאת הנתונים שפייתון שולח (נתיבים ושמות קבצים) ---
 function getJobData(jobPath) {
-    // When this script is evaluated from memory, $.fileName belongs to the
-    // caller (or can be empty). Python supplies the exact job path instead.
-    var dataFile;
-    if (jobPath) {
-        dataFile = new File(jobPath);
-    } else {
-        var scriptFile = new File($.fileName);
-        dataFile = new File(scriptFile.path + "/current_job.json");
-    }
+    var dataFile = new File(jobPath || new File($.fileName).path + "/current_job.json");
     if (!dataFile.exists) return null;
-    dataFile.open("r");
-    var content = dataFile.read();
-    dataFile.close();
-    return eval("(" + content + ")");
+    dataFile.encoding = "UTF-8";
+    if (!dataFile.open("r")) {
+        $.writeln("Could not open sidebar job settings: " + dataFile.fsName + " (" + dataFile.error + ")");
+        return null;
+    }
+    try {
+        var content = dataFile.read();
+        if (!content || !/\S/.test(content)) {
+            $.writeln("Sidebar job settings are empty: " + dataFile.fsName);
+            return null;
+        }
+        return eval("(" + content + ")");
+    } catch (err) {
+        $.writeln("Could not read sidebar job settings: " + dataFile.fsName + " (" + err + ")");
+        return null;
+    } finally {
+        dataFile.close();
+    }
 }
-var job = getJobData(typeof sidebarJobPath === "undefined" ? null : sidebarJobPath);
+var job = typeof sidebarJobData !== "undefined" ? sidebarJobData :
+    getJobData(typeof sidebarJobPath === "undefined" ? null : sidebarJobPath);
 var showSidebar = job ? job.show_sidebar : true;
 var orderedProducts = job ? job.ordered_products : [];
 var upsellMode = job ? job.upsell_mode : "random";
@@ -144,7 +151,7 @@ function getRandomItems(arr, count) {
     }
     return workingArr.slice(0, count);
 }
-function addSimulationSidebar(targetDoc) {
+function addSimulationSidebar(targetDoc, deferTemplateClose) {
     $.writeln("=== SIDEBAR LOGIC START ===");
     app.userInteractionLevel = UserInteractionLevel.DONTDISPLAYALERTS;
     if (!targetDoc && app.documents.length === 0) {
@@ -345,15 +352,22 @@ function addSimulationSidebar(targetDoc) {
         $.writeln("Error file: " + e.fileName);
     } finally {
         if (sbDoc) {
-            try {
-                sbDoc.activate();
-                var activeTemplate = app.activeDocument;
-                if (activeTemplate.fullName.fsName.toLowerCase() !== sidebarFile.fsName.toLowerCase()) {
-                    throw new Error("Could not activate the sidebar template: " + sidebarFile.fsName);
+            var closeTemplate = function () {
+                try {
+                    sbDoc.activate();
+                    var activeTemplate = app.activeDocument;
+                    if (activeTemplate.fullName.fsName.toLowerCase() !== sidebarFile.fsName.toLowerCase()) {
+                        throw new Error("Could not activate the sidebar template: " + sidebarFile.fsName);
+                    }
+                    activeTemplate.close(SaveOptions.DONOTSAVECHANGES);
+                } catch (err) {
+                    $.writeln("Error closing sidebar template: " + err.toString());
                 }
-                activeTemplate.close(SaveOptions.DONOTSAVECHANGES);
-            } catch (err) {
-                $.writeln("Error closing sidebar template: " + err.toString());
+            };
+            if (deferTemplateClose) {
+                deferTemplateClose(closeTemplate);
+            } else {
+                closeTemplate();
             }
         }
         try {
@@ -581,4 +595,7 @@ function getLumFromColor(color) {
     } catch(e) {}
     return null;
 }
-addSimulationSidebar(typeof sidebarTargetDoc === "undefined" ? null : sidebarTargetDoc);
+addSimulationSidebar(
+    typeof sidebarTargetDoc === "undefined" ? null : sidebarTargetDoc,
+    typeof deferSidebarTemplateClose === "undefined" ? null : deferSidebarTemplateClose
+);

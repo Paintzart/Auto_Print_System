@@ -17,7 +17,7 @@ from typing import Dict, Any, Optional
 sys.stdout.reconfigure(encoding='utf-8')
 # ייבוא הפונקציות הגרפיות
 from illustrator_ops import run_jsx, open_and_color_template, place_and_simulate_print, update_size_label, delete_side_assets, delete_print_layer_only, save_pdf, clean_layout, apply_simulation_details, close_all_illustrator_documents, save_native_ai, is_pdf_disguised_as_ai, VARIABLE_PRINT_COLS, VARIABLE_PRINT_GAP_MIN
-from illustrator_ops import JSX_SIMULATION_STACKING
+from illustrator_ops import JSX_SAVE_PRESS_QUALITY_PDF, JSX_SIMULATION_STACKING, stage_pdf
 from vectorizer_ops import IS_TEST_MODE, convert_to_svg
 # --- הגדרות ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -643,6 +643,14 @@ def mark_sidebar_already_applied() -> None:
         json.dump(job, f, ensure_ascii=False, indent=4)
 
 
+def load_sidebar_function(path: str) -> str:
+    with open(path, "r", encoding="utf-8-sig") as f:
+        source = f.read().replace("#target illustrator", "", 1)
+    if not source.strip():
+        raise ValueError(f"Sidebar script is empty: {path}")
+    return f"function addSidebar(sidebarTargetDoc, sidebarJobData, deferSidebarTemplateClose) {{\n{source}\n}}"
+
+
 def apply_sidebar_to_open_document(app, doc_name: str, order_data: Optional[Dict[str, Any]] = None) -> bool:
     """מריץ sidebar_logic.jsx על מסמך AI פתוח — לפני שמירה (מונע כשל PDF)."""
     job = write_merge_job_config(order_data)
@@ -652,15 +660,12 @@ def apply_sidebar_to_open_document(app, doc_name: str, order_data: Optional[Dict
     if not os.path.exists(sidebar_logic_path):
         print("   ⚠ Sidebar template script missing — skip ad")
         return False
-    with open(sidebar_logic_path, "r", encoding="utf-8-sig") as f:
-        sidebar_source = f.read()
-    # #target is an ExtendScript file directive; it is not valid inside eval().
-    sidebar_source = sidebar_source.replace("#target illustrator", "", 1)
-    sidebar_source_js = json.dumps(sidebar_source, ensure_ascii=True)
-    sidebar_job_path_js = json.dumps(
-        os.path.join(BASE_DIR, "current_job.json").replace("\\", "/"),
-        ensure_ascii=True,
-    )
+    try:
+        sidebar_function = load_sidebar_function(sidebar_logic_path)
+    except (OSError, ValueError) as e:
+        print(f"   ⚠ Sidebar apply failed: {e}")
+        return False
+    sidebar_job_js = json.dumps(job, ensure_ascii=True)
     doc_name_js = json.dumps(doc_name, ensure_ascii=True)
     jsx = f"""
     #target illustrator
@@ -682,9 +687,8 @@ def apply_sidebar_to_open_document(app, doc_name: str, order_data: Optional[Dict
                 if (lay !== l1) lay.move(l1, ElementPlacement.PLACEATEND);
             }}
         }}
-        var sidebarSource = {sidebar_source_js};
-        var addSidebar = eval("(function (sidebarTargetDoc, sidebarJobPath) {{\\n" + sidebarSource + "\\n}})");
-        addSidebar(doc, {sidebar_job_path_js});
+        {sidebar_function}
+        addSidebar(doc, {sidebar_job_js});
     }})();
     """
     try:
@@ -727,18 +731,12 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
     sidebar_already_applied = bool(job_config.get("sidebar_already_applied", False))
     sim_ad = order_data.get('simulation_ad', {}) or {} if order_data else {}
     print(f"\n🔍 DEBUG: sim_ad = {sim_ad}")
-    show_sidebar = bool(sim_ad.get('enabled', False))
-    upsell_mode = sim_ad.get('mode', 'random')
-    manual_list = sim_ad.get('selected_products', [])
+    show_sidebar = job_config["show_sidebar"]
+    upsell_mode = job_config["upsell_mode"]
+    manual_list = job_config["manual_products"]
     print(f"🔍 DEBUG: show_sidebar = {show_sidebar}")
     print(f"🔍 DEBUG: upsell_mode = {upsell_mode}")
     print(f"🔍 DEBUG: manual_list = {manual_list}")
-    job_config["show_sidebar"] = show_sidebar
-    job_config["upsell_mode"] = upsell_mode
-    job_config["manual_products"] = manual_list
-    job_config["ordered_products"] = ordered_products
-    with open(os.path.join(BASE_DIR, "current_job.json"), "w", encoding="utf-8") as f:
-        json.dump(job_config, f, ensure_ascii=False, indent=4)
     merge_open_dir = os.path.join(BASE_DIR, "temp_ai_files", "_merge_open")
     os.makedirs(merge_open_dir, exist_ok=True)
     local_merge_files = []
@@ -759,20 +757,19 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
     sidebar_exists = os.path.exists(sidebar_logic_path)
     print(f"🔍 DEBUG: sidebar_logic.jsx exists: {sidebar_exists}")
     print(f"🔍 DEBUG: sidebar_logic.jsx path: {sidebar_logic_path}")
-    sidebar_source_js = "null"
-    if sidebar_exists:
-        with open(sidebar_logic_path, "r", encoding="utf-8-sig") as f:
-            sidebar_source = f.read().replace("#target illustrator", "", 1)
-            sidebar_source_js = json.dumps(sidebar_source, ensure_ascii=True)
-    sidebar_job_path_js = json.dumps(
-        os.path.join(BASE_DIR, "current_job.json").replace("\\", "/"),
-        ensure_ascii=True,
-    )
+    sidebar_function = ""
+    if show_sidebar and not sidebar_already_applied and sidebar_exists:
+        sidebar_function = load_sidebar_function(sidebar_logic_path)
+    sidebar_job_js = json.dumps(job_config, ensure_ascii=True)
     jsx_content = f"""
     #target illustrator
+function runMerge(outputPath) {{
     {JSX_SIMULATION_STACKING}
+    {JSX_SAVE_PRESS_QUALITY_PDF}
     var files = {json.dumps(js_files)};
     var mergeStage = "startup";
+    var masterDoc = null;
+    var closeSidebarTemplate = null;
     function fileLooksLikePdf(f) {{
         try {{
             if (!f.open("r")) return false;
@@ -812,7 +809,7 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
         if (files.length === 0) return;
         app.userInteractionLevel = UserInteractionLevel.DONTDISPLAYALERTS;
         mergeStage = "opening master document";
-        var masterDoc = openFileSafe(files[0]);
+        masterDoc = openFileSafe(files[0]);
         var masterMetrics = calculateLayoutMetrics(masterDoc);
         var maxWidth = masterMetrics.width;
         var maxHeight = masterMetrics.height;
@@ -839,7 +836,8 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
             var row = Math.floor(j / COLS);
             processNextFileFast(masterDoc, files[j], (j+1).toString(), col * STEP_X, -(row * STEP_Y));
         }}
-        var sidebarSource = {sidebar_source_js};
+        {sidebar_function}
+        var sidebarLoaded = typeof addSidebar === "function";
         var showSidebar = {str(show_sidebar).lower()};
         var sidebarAlreadyApplied = {str(sidebar_already_applied).lower()};
         function docHasSidebarLayer(doc) {{
@@ -856,25 +854,25 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
         $.writeln("=== MERGE SCRIPT: Sidebar check ===");
         $.writeln("showSidebar: " + showSidebar);
         $.writeln("sidebarAlreadyApplied: " + sidebarAlreadyApplied);
-        $.writeln("sidebar source loaded: " + (sidebarSource !== null));
+        $.writeln("sidebar source loaded: " + sidebarLoaded);
         $.writeln("masterDoc name: " + masterDoc.name);
-        if (showSidebar && !sidebarAlreadyApplied && !docHasSidebarLayer(masterDoc) && sidebarSource !== null) {{
+        if (showSidebar && !sidebarAlreadyApplied && !docHasSidebarLayer(masterDoc) && sidebarLoaded) {{
             mergeStage = "adding simulation sidebar";
-            var addSidebar = eval("(function (sidebarTargetDoc, sidebarJobPath) {{\\n" + sidebarSource + "\\n}})");
-            addSidebar(masterDoc, {sidebar_job_path_js});
+            addSidebar(masterDoc, {sidebar_job_js}, function (closeTemplate) {{
+                closeSidebarTemplate = closeTemplate;
+            }});
         }} else {{
-            $.writeln("Sidebar skipped (showSidebar=" + showSidebar + ", alreadyApplied=" + sidebarAlreadyApplied + ", hasLayer=" + docHasSidebarLayer(masterDoc) + ", sourceLoaded=" + (sidebarSource !== null) + ")");
+            $.writeln("Sidebar skipped (showSidebar=" + showSidebar + ", alreadyApplied=" + sidebarAlreadyApplied + ", hasLayer=" + docHasSidebarLayer(masterDoc) + ", sourceLoaded=" + sidebarLoaded + ")");
         }}
-        mergeStage = "reactivating the master document";
-        // Opening and closing the sidebar template can invalidate the earlier document reference.
-        masterDoc = findOpenMergeDocument(new File(files[0]));
-        if (!masterDoc) throw new Error("The merged document is no longer open: " + files[0]);
-        masterDoc.activate();
         mergeStage = "ordering simulation layers";
+        masterDoc.activate();
         orderSimulationLayers(masterDoc);
         mergeStage = "reordering artboards";
         reorderArtboardsSafe(masterDoc);
-        mergeStage = "complete";
+        var hasSidebar = docHasSidebarLayer(masterDoc);
+        mergeStage = "saving the merged PDF";
+        var preset = savePressQualityPDF(masterDoc, outputPath);
+        return preset + "|" + hasSidebar;
     }}
     // --- שאר הפונקציות (calculateLayoutMetrics, organizeMasterContent וכו') נשארות ללא שינוי ---
     function calculateLayoutMetrics(doc) {{
@@ -939,6 +937,7 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
             dLay.name = sLay.name;
             fastCopyLayer(sLay, dLay, offX, offY);
         }}
+        srcDoc.activate();
         srcDoc.close(SaveOptions.DONOTSAVECHANGES);
         masterDoc.activate();
         for(var n=0; n<abData.length; n++){{
@@ -958,13 +957,21 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
         for (var k = 0; k < len; k++) doc.artboards[0].remove();
     }}
     try {{
-        main();
+        return main();
     }} catch (mergeError) {{
         throw new Error(
             "Merge failed during " + mergeStage + ": " + mergeError.message +
             (mergeError.line ? " (line " + mergeError.line + ")" : "")
         );
+    }} finally {{
+        if (masterDoc) {{
+            try {{ masterDoc.close(SaveOptions.DONOTSAVECHANGES); }}
+            catch (closeError) {{ $.writeln("Could not close merged document: " + closeError); }}
+        }}
+        // Closing the template can change Illustrator's document context. Export first.
+        if (closeSidebarTemplate) closeSidebarTemplate();
     }}
+}}
     """
     try:
         print(f"\n🔍 DEBUG: About to run merge script...")
@@ -1012,8 +1019,13 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
                 "4 attempts. Restart Illustrator or repair its COM registration."
             ) from last_method_error
 
+        def export_merged_pdf(do_javascript):
+            with stage_pdf(output_pdf) as staged_path:
+                return do_javascript(f"{jsx_content}\nrunMerge({json.dumps(staged_path)});")
+
+        print(f"💾 DEBUG: Saving PDF to: {os.path.abspath(output_pdf)}")
         try:
-            javascript_method(jsx_content)
+            result = export_merged_pdf(javascript_method)
         except Exception as rpc_error:
             if getattr(rpc_error, "hresult", None) not in (-2147023170, -2147023174, -2147417848):
                 raise
@@ -1021,48 +1033,12 @@ def create_and_run_merge_script(files_list, output_pdf, order_data=None):
             javascript_method = app = None
             time.sleep(1)
             app = win32com.client.Dispatch("Illustrator.Application")
-            app.DoJavaScript(jsx_content)
-        print(f"🔍 DEBUG: JavaScript executed")
-        documents = app.Documents
-        master_path = os.path.normcase(os.path.abspath(js_files[0]))
-        doc = None
-        for index in range(1, documents.Count + 1):
-            candidate = documents.Item(index)
-            try:
-                candidate_path = os.path.normcase(os.path.abspath(str(candidate.FullName)))
-            except Exception:
-                continue
-            if candidate_path == master_path:
-                doc = candidate
-                break
-        if doc is not None:
-            print(f"🔍 DEBUG: Merged document before save: {doc.Name}")
-            # בדיקה כמה שכבות יש במסמך (כדי לראות אם התפריט הצד נוסף)
-            try:
-                layers = doc.Layers
-                layers_count = layers.Count
-                print(f"🔍 DEBUG: Document has {layers_count} layers")
-                # בדיקה אם יש שכבה בשם Sidebar_Layer
-                has_sidebar = False
-                for i in range(1, layers_count + 1):
-                    try:
-                        layer = layers.Item(i)
-                        if "Sidebar" in layer.Name:
-                            has_sidebar = True
-                            print(f"✅ DEBUG: Found Sidebar layer: {layer.Name}")
-                            break
-                    except:
-                        continue
-                if show_sidebar and not has_sidebar:
-                    print(f"⚠️ WARNING: No Sidebar layer found in document!")
-            except Exception as e:
-                print(f"⚠️ DEBUG: Error checking layers: {e}")
-            final_path = os.path.abspath(output_pdf).replace("/", "\\")
-            print(f"💾 DEBUG: Saving PDF to: {final_path}")
-            save_pdf(doc, final_path, app=app)
-            print(f"✅ DEBUG: PDF saved successfully")
-            return True
-        raise RuntimeError(f"Illustrator merge completed without the expected document: {master_path}")
+            result = export_merged_pdf(app.DoJavaScript)
+        preset, _, has_sidebar = result.partition("|")
+        if show_sidebar and has_sidebar == "false":
+            print("⚠️ WARNING: No Sidebar_Layer found in the merged document")
+        print(f"✅ DEBUG: PDF saved successfully using {preset}")
+        return True
     except Exception as e:
         print(f"Error during execution/save: {e}")
         import traceback
