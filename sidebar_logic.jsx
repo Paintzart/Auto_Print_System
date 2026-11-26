@@ -151,231 +151,125 @@ function getRandomItems(arr, count) {
     }
     return workingArr.slice(0, count);
 }
-function addSimulationSidebar(targetDoc, deferTemplateClose) {
-    $.writeln("=== SIDEBAR LOGIC START ===");
-    app.userInteractionLevel = UserInteractionLevel.DONTDISPLAYALERTS;
-    if (!targetDoc && app.documents.length === 0) {
-        $.writeln("ERROR: No documents open!");
-        return;
+var sidebarTemplateDoc = null;
+var sidebarTemplateFile = null;
+
+function prepareSimulationSidebar() {
+    var selected = upsellMode === "manual" && manualProducts.length > 0 ?
+        manualProducts.slice(0, 3) : getSmartUpsellItems(allUpsellOptions, orderedProducts);
+    $.writeln("Selected sidebar products: " + selected.join(", "));
+
+    sidebarTemplateFile = new File(sidebarMasterPath);
+    if (!sidebarTemplateFile.exists) {
+        throw new Error("Sidebar template is missing: " + sidebarTemplateFile.fsName);
     }
-    $.writeln("Number of open documents: " + app.documents.length);
-    // בדיקה אם בכלל צריך להוסיף תפריט צד
-    if (!showSidebar) {
-        $.writeln("Sidebar disabled by config.");
-        return;
+    sidebarTemplateDoc = app.open(sidebarTemplateFile);
+    sidebarTemplateDoc.activate();
+    if (sidebarTemplateDoc.documentColorSpace !== DocumentColorSpace.RGB) {
+        app.executeMenuCommand("doc-color-rgb");
     }
-    if (job && job.sidebar_already_applied) {
-        $.writeln("Sidebar already applied in variable step — skip.");
-        return;
-    }
-    var pdfDoc = targetDoc || app.activeDocument;
-    $.writeln("Target document name: " + pdfDoc.name);
-    function docHasSidebarLayer(doc) {
-        function scan(container) {
-            if (!container || !container.layers) return false;
-            for (var i = 0; i < container.layers.length; i++) {
-                if (container.layers[i].name === "Sidebar_Layer") return true;
-                if (scan(container.layers[i])) return true;
-            }
-            return false;
+
+    var sidebarLayer = sidebarTemplateDoc.layers.getByName("Sidebar");
+    var productsLayer = sidebarTemplateDoc.layers.getByName("Products");
+    for (var p = 0; p < 3; p++) {
+        var placeholder = sidebarLayer.pageItems.getByName("Product_" + (p + 1));
+        if (p < selected.length) {
+            var product = productsLayer.pageItems.getByName(selected[p]);
+            var copy = product.duplicate(sidebarLayer, ElementPlacement.PLACEATBEGINNING);
+            copy.left = placeholder.left;
+            copy.top = placeholder.top;
         }
-        return scan(doc);
+        placeholder.remove();
     }
-    if (docHasSidebarLayer(pdfDoc)) {
-        $.writeln("Sidebar_Layer already in document — skip duplicate ad.");
-        return;
+    productsLayer.remove();
+    var palette = allPalettes[Math.floor(Math.random() * allPalettes.length)];
+    recolorSidebarUI(sidebarTemplateDoc, palette);
+
+    var artwork = sidebarLayer.groupItems.add();
+    for (var i = sidebarLayer.pageItems.length - 1; i >= 1; i--) {
+        sidebarLayer.pageItems[i].move(artwork, ElementPlacement.PLACEATBEGINNING);
     }
-    $.writeln("Number of artboards: " + pdfDoc.artboards.length);
-    var abRect = pdfDoc.artboards[0].artboardRect;
-    $.writeln("First artboard rect: " + abRect.toString());
-    var sidebarFile = new File(sidebarMasterPath);
-    var sbDoc = null;
+    return artwork;
+}
+
+function closeSimulationSidebar() {
+    if (!sidebarTemplateDoc) return;
     try {
-        pdfDoc.activate();
-        $.writeln("--- Step 1: Finding layer '1' ---");
-        var layer1 = pdfDoc.layers.getByName("1");
-        $.writeln("Layer '1' found: " + (layer1 ? "YES" : "NO"));
-        $.writeln("--- Step 2: Checking if product is dark ---");
-        var isDark = checkIsProductDark(layer1);
-        $.writeln("Product is dark: " + isDark);
-        $.writeln("--- Step 3: Resizing layer 1 ---");
-        resizeLayer1Aggressive(pdfDoc, layer1, abRect);
-        $.writeln("Layer 1 resized");
-        $.writeln("--- Step 4: Finding logo ---");
-        var logoData = findLogoByPriority(layer1);
-        if (!logoData) {
-            $.writeln("ERROR: Logo not found!");
-            throw new Error("לא נמצא לוגו S_Placement בשכבה 1");
+        sidebarTemplateDoc.activate();
+        var active = app.activeDocument;
+        if (active.fullName.fsName.toLowerCase() !== sidebarTemplateFile.fsName.toLowerCase()) {
+            throw new Error("Could not activate the sidebar template: " + sidebarTemplateFile.fsName);
         }
-        $.writeln("Logo found: " + logoData.type);
-        // --- בחירת מוצרים חכמה ---
-        $.writeln("--- Step 5: Selecting products ---");
-        var selected;
-        if (upsellMode === "manual" && manualProducts.length > 0) {
-            // שימוש במוצרים שנבחרו ידנית
-            selected = manualProducts.slice(0, 3); // לוקח עד 3 מוצרים
-            $.writeln("Using manual selected products: " + selected.join(", "));
-        } else {
-            // בחירה רנדומלית (כבר קיים)
-            selected = getSmartUpsellItems(allUpsellOptions, orderedProducts);
-        }
-        $.writeln("Selected products: " + selected.join(", "));
-        $.writeln("--- Step 6: Opening sidebar template ---");
-        $.writeln("Sidebar template path: " + sidebarMasterPath);
-        sbDoc = app.open(sidebarFile);
-        $.writeln("Sidebar template opened: " + sbDoc.name);
-        $.writeln("--- Step 7: Setting RGB color mode ---");
-        sbDoc.activate();
-        if (sbDoc.documentColorSpace !== DocumentColorSpace.RGB) {
-            app.executeMenuCommand('doc-color-rgb');
-        }
-        $.writeln("--- Step 8: Getting sidebar layers ---");
-        var sbLayer = sbDoc.layers.getByName("Sidebar");
-        $.writeln("Sidebar layer found: " + (sbLayer ? "YES" : "NO"));
-        var productsLayer = sbDoc.layers.getByName("Products");
-        $.writeln("Products layer found: " + (productsLayer ? "YES" : "NO"));
-        $.writeln("--- Step 9: Copying products to sidebar ---");
-        for (var p = 0; p < 3; p++) {
-            $.writeln("Processing product " + (p + 1) + ": " + selected[p]);
-            var src = productsLayer.pageItems.getByName(selected[p]);
-            $.writeln("  Source product found: " + (src ? "YES" : "NO"));
-            var ph = sbLayer.pageItems.getByName("Product_" + (p + 1));
-            $.writeln("  Placeholder found: " + (ph ? "YES" : "NO"));
-            if (src && ph) {
-                var nProd = src.duplicate(sbLayer, ElementPlacement.PLACEATBEGINNING);
-                nProd.left = ph.left; nProd.top = ph.top; ph.remove();
-                $.writeln("  Product " + (p + 1) + " placed successfully");
-            }
-        }
-        $.writeln("--- Step 10: Removing products layer ---");
-        productsLayer.remove();
-        $.writeln("--- Step 11: Recoloring sidebar UI ---");
-        var selectedPalette = allPalettes[Math.floor(Math.random() * allPalettes.length)];
-        $.writeln("Selected palette: " + selectedPalette.name);
-        recolorSidebarUI(sbDoc, selectedPalette);
-        $.writeln("Sidebar recolored");
-        $.writeln("--- Step 12: Grouping sidebar items ---");
-        var finalBar = sbLayer.groupItems.add();
-        $.writeln("Sidebar layer pageItems count: " + sbLayer.pageItems.length);
-        for (var m = sbLayer.pageItems.length - 1; m >= 1; m--) sbLayer.pageItems[m].move(finalBar, ElementPlacement.PLACEATBEGINNING);
-        $.writeln("Items grouped into finalBar");
-        
-        // --- העתקה ישירה במקום clipboard ---
-        $.writeln("--- Step 13: Preparing to copy sidebar directly ---");
-        // וידוא שהמסמך הראשי פעיל לפני העתקה
-        pdfDoc.activate();
-        $.writeln("Main document activated: " + pdfDoc.name);
-        app.redraw();
-        
-        $.writeln("--- Step 14: Creating Sidebar_Layer in main document ---");
-        var sidebarFinalLayer;
-        try { 
-            sidebarFinalLayer = pdfDoc.layers.getByName("Sidebar_Layer"); 
-            $.writeln("Sidebar_Layer already exists");
-        }
-        catch(e) { 
-            sidebarFinalLayer = pdfDoc.layers.add(); 
-            sidebarFinalLayer.name = "Sidebar_Layer";
-            $.writeln("Sidebar_Layer created");
-        }
-        pdfDoc.activeLayer = sidebarFinalLayer;
-        $.writeln("Active layer set to: " + sidebarFinalLayer.name);
-        
-        $.writeln("--- Step 15: Copying sidebar directly (not using clipboard) ---");
-        // העתקה ישירה מהמסמך של התפריט למסמך הראשי
-        var pastedBar = finalBar.duplicate(sidebarFinalLayer, ElementPlacement.PLACEATBEGINNING);
-        $.writeln("Sidebar copied directly! Type: " + pastedBar.typename);
-        
-        $.writeln("--- Step 19: Positioning sidebar ---");
-        pastedBar.left = abRect[0];
-        pastedBar.top = abRect[1] - (Math.abs(abRect[1] - abRect[3]) - pastedBar.height) / 2;
-        $.writeln("Sidebar positioned at: left=" + pastedBar.left + ", top=" + pastedBar.top);
-        // הכנת הלוגו לשיבוץ
-        $.writeln("--- Step 20: Preparing logo for placement ---");
-        var masterLogo = pdfDoc.groupItems.add();
-        $.writeln("Master logo group created");
-        $.writeln("Logo item pageItems count: " + logoData.item.pageItems.length);
-        for(var l=0; l<logoData.item.pageItems.length; l++) {
-            logoData.item.pageItems[l].duplicate(masterLogo, ElementPlacement.PLACEATEND);
-        }
-        masterLogo.visible = false;
-        $.writeln("Master logo prepared with " + masterLogo.pageItems.length + " items");
-        $.writeln("--- Step 21: Processing products in sidebar ---");
-        $.writeln("Pasted bar groupItems count: " + pastedBar.groupItems.length);
-        for (var k = 0; k < pastedBar.groupItems.length; k++) {
-            var prod = pastedBar.groupItems[k];
-            $.writeln("Processing product " + (k + 1) + " of " + pastedBar.groupItems.length);
-            // צביעה לשחור (אם כהה) - חיפוש אגרסיבי של Simulation
-            if (isDark) {
-                $.writeln("  Product is dark, searching for Simulation...");
-                var prodSim = findRecursive(prod, "Simulation");
-                if (prodSim) {
-                    $.writeln("  Simulation found, forcing black color");
-                    forceColorBlackRecursive(prodSim);
-                } else {
-                    $.writeln("  Simulation not found");
-                }
-            }
-            $.writeln("  Searching for logo box...");
-            var box = selectAndCleanupBoxes(prod, logoData.type);
-            if (box) {
-                $.writeln("  Logo box found: " + box.name);
-                var nLogo = masterLogo.duplicate(prod, ElementPlacement.PLACEATBEGINNING);
-                nLogo.visible = true;
-                var sc = Math.min(box.width / nLogo.width, box.height / nLogo.height) * 100;
-                $.writeln("  Logo scale: " + sc + "%");
-                nLogo.resize(sc, sc, true, true, true, true, sc);
-                nLogo.left = box.left + (box.width - nLogo.width) / 2;
-                nLogo.top = box.top - (box.height - nLogo.height) / 2;
-                $.writeln("  Logo placed at: left=" + nLogo.left + ", top=" + nLogo.top);
-            } else {
-                $.writeln("  Logo box NOT found for product " + (k + 1));
-            }
-            $.writeln("  Removing boxes...");
-            removeBoxesRecursive(prod);
-        }
-        $.writeln("--- Step 22: Cleaning up master logo ---");
-        masterLogo.remove();
-        $.writeln("--- Step 23: Ungrouping sidebar ---");
-        ungroupSidebarItems(pastedBar);
-        $.writeln("Sidebar ungrouped");
-        $.writeln("=== SIDEBAR LOGIC COMPLETE ===");
-        $.writeln("Sidebar successfully added to document: " + pdfDoc.name);
-        $.writeln("Document has " + pdfDoc.layers.length + " layers");
-        $.writeln("Document has " + pdfDoc.artboards.length + " artboards");
-        // המסמך הראשי יישמר כ-PDF על ידי הסקריפט הראשי (main.py)
-        // אין צורך לשמור או לסגור כאן - הסקריפט הראשי יעשה זאת
-    } catch (e) { 
-        $.writeln("=== ERROR IN SIDEBAR LOGIC ===");
-        $.writeln("Error message: " + e.toString());
-        $.writeln("Error line: " + e.line);
-        $.writeln("Error file: " + e.fileName);
+        active.close(SaveOptions.DONOTSAVECHANGES);
+    } catch (error) {
+        $.writeln("Error closing sidebar template: " + error);
     } finally {
-        if (sbDoc) {
-            var closeTemplate = function () {
-                try {
-                    sbDoc.activate();
-                    var activeTemplate = app.activeDocument;
-                    if (activeTemplate.fullName.fsName.toLowerCase() !== sidebarFile.fsName.toLowerCase()) {
-                        throw new Error("Could not activate the sidebar template: " + sidebarFile.fsName);
-                    }
-                    activeTemplate.close(SaveOptions.DONOTSAVECHANGES);
-                } catch (err) {
-                    $.writeln("Error closing sidebar template: " + err.toString());
-                }
-            };
-            if (deferTemplateClose) {
-                deferTemplateClose(closeTemplate);
-            } else {
-                closeTemplate();
-            }
-        }
-        try {
-            pdfDoc.activate();
-        } catch (err) {
-            $.writeln("Error reactivating document: " + err.toString());
-        }
+        sidebarTemplateDoc = null;
+        sidebarTemplateFile = null;
     }
+}
+
+function hasSidebarLayer(container) {
+    for (var i = 0; i < container.layers.length; i++) {
+        var layer = container.layers[i];
+        if (layer.name === "Sidebar_Layer" || hasSidebarLayer(layer)) return true;
+    }
+    return false;
+}
+
+function addSimulationSidebar(doc, artwork) {
+    if (!showSidebar || (job && job.sidebar_already_applied) || hasSidebarLayer(doc)) return false;
+
+    var layer1 = doc.layers.getByName("1");
+    if (!findLogoByPriority(layer1)) {
+        $.writeln("Sidebar skipped: no simulation logo found");
+        return false;
+    }
+
+    if (!artwork) {
+        artwork = prepareSimulationSidebar();
+        doc.activate();
+    }
+    var abRect = doc.artboards[0].artboardRect;
+    var isDark = checkIsProductDark(layer1);
+    resizeLayer1Aggressive(layer1, abRect);
+    var logoData = findLogoByPriority(layer1);
+    if (!logoData) throw new Error("Missing simulation logo after resizing layer 1");
+
+    var sidebarLayer = doc.layers.add();
+    sidebarLayer.name = "Sidebar_Layer";
+    doc.activeLayer = sidebarLayer;
+    var pastedBar = artwork.duplicate(sidebarLayer, ElementPlacement.PLACEATBEGINNING);
+    pastedBar.left = abRect[0];
+    pastedBar.top = abRect[1] - (Math.abs(abRect[1] - abRect[3]) - pastedBar.height) / 2;
+
+    var masterLogo = sidebarLayer.groupItems.add();
+    for (var i = 0; i < logoData.item.pageItems.length; i++) {
+        logoData.item.pageItems[i].duplicate(masterLogo, ElementPlacement.PLACEATEND);
+    }
+    masterLogo.visible = false;
+    for (var k = 0; k < pastedBar.groupItems.length; k++) {
+        var prod = pastedBar.groupItems[k];
+        if (isDark) {
+            var prodSim = findRecursive(prod, "Simulation");
+            if (prodSim) forceColorBlackRecursive(prodSim);
+        }
+
+        var box = selectAndCleanupBoxes(prod, logoData.type);
+        if (box) {
+            var logo = masterLogo.duplicate(prod, ElementPlacement.PLACEATBEGINNING);
+            logo.visible = true;
+            var scale = Math.min(box.width / logo.width, box.height / logo.height) * 100;
+            logo.resize(scale, scale, true, true, true, true, scale);
+            logo.left = box.left + (box.width - logo.width) / 2;
+            logo.top = box.top - (box.height - logo.height) / 2;
+        }
+        removeBoxesRecursive(prod);
+    }
+    masterLogo.remove();
+    ungroupSidebarItems(pastedBar);
+    $.writeln("Sidebar added to " + doc.name);
+    return true;
 }
 
 function ungroupSidebarItems(group) {
@@ -531,7 +425,7 @@ function hexToRgb(h) {
     c.red = parseInt(s.substring(0,2), 16); c.green = parseInt(s.substring(2,4), 16); c.blue = parseInt(s.substring(4,6), 16);
     return c;
 }
-function resizeLayer1Aggressive(doc, mainLayer, abRect) {
+function resizeLayer1Aggressive(mainLayer, abRect) {
     try {
         var simContainer = mainLayer.layers.getByName("Simulation");
         // שלב א: הפיכת כל תתי-השכבות בתוך Simulation לקבוצות
@@ -552,7 +446,6 @@ function resizeLayer1Aggressive(doc, mainLayer, abRect) {
             if (items[k] != masterGrp) items[k].move(masterGrp, ElementPlacement.PLACEATBEGINNING);
         }
         // שלב ג: הקטנה ל-23 ס"מ והצמדה לימין
-        app.redraw();
         var targetWidth = 23 * 28.346;
         var ratio = (targetWidth / masterGrp.width) * 100;
         masterGrp.resize(ratio, ratio, true, true, true, true, ratio);
@@ -595,7 +488,15 @@ function getLumFromColor(color) {
     } catch(e) {}
     return null;
 }
-addSimulationSidebar(
-    typeof sidebarTargetDoc === "undefined" ? null : sidebarTargetDoc,
-    typeof deferSidebarTemplateClose === "undefined" ? null : deferSidebarTemplateClose
-);
+if (typeof sidebarJobData === "undefined" && app.documents.length > 0) {
+    var standaloneDoc = typeof sidebarTargetDoc === "undefined" ? app.activeDocument : sidebarTargetDoc;
+    app.userInteractionLevel = UserInteractionLevel.DONTDISPLAYALERTS;
+    try {
+        addSimulationSidebar(standaloneDoc, null);
+    } catch (error) {
+        $.writeln("Error adding sidebar: " + error);
+    } finally {
+        closeSimulationSidebar();
+        standaloneDoc.activate();
+    }
+}
