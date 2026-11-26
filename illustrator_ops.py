@@ -3496,11 +3496,43 @@ function savePressQualityPDF(doc, path, artboardRange) {
 '''
 
 
+def _publish_pdf(local_pdf: Path, destination: Path):
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    fd, publish_name = tempfile.mkstemp(prefix=".auto-print-", suffix=".tmp", dir=destination.parent)
+    publish_path = Path(publish_name)
+    try:
+        os.close(fd)
+        shutil.copyfile(local_pdf, publish_path)
+        for delay in (0.5, 1, 2, 4, None):
+            try:
+                os.replace(publish_path, destination)
+                return
+            except PermissionError:
+                if delay is not None:
+                    time.sleep(delay)
+                    continue
+                if os.name == "nt":
+                    # Some drives permit a rename without the replace-existing flag.
+                    # On Windows, rename fails if another file is already there.
+                    try:
+                        os.rename(publish_path, destination)
+                        return
+                    except (FileExistsError, PermissionError):
+                        pass
+                raise
+    finally:
+        try:
+            publish_path.unlink(missing_ok=True)
+        except OSError as error:
+            print(f"   > Could not remove temporary file {publish_path}: {error}")
+
+
 @contextmanager
 def stage_pdf(path):
     """Export locally, validate the PDF, then replace the destination atomically."""
     destination = Path(path).absolute()
     local_pdf = Path(tempfile.gettempdir()) / f"auto-print-{uuid.uuid4().hex}.pdf"
+    keep_local = False
     try:
         yield local_pdf.as_posix()
         import fitz
@@ -3509,24 +3541,17 @@ def stage_pdf(path):
             if not pdf.is_pdf or pdf.is_repaired or not pdf.page_count:
                 raise RuntimeError(f"Adobe produced an invalid PDF for {destination.name}")
 
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        fd, publish_name = tempfile.mkstemp(prefix=".auto-print-", suffix=".tmp", dir=destination.parent)
-        os.close(fd)
-        publish_path = Path(publish_name)
         try:
-            shutil.copyfile(local_pdf, publish_path)
-            for attempt in range(3):
-                try:
-                    os.replace(publish_path, destination)
-                    break
-                except PermissionError:
-                    if attempt == 2:
-                        raise
-                    time.sleep(0.4 * (attempt + 1))
-        finally:
-            publish_path.unlink(missing_ok=True)
+            _publish_pdf(local_pdf, destination)
+        except OSError as error:
+            keep_local = True
+            raise RuntimeError(
+                f"Could not save PDF to {destination}: {error.strerror or error}. "
+                f"The validated PDF is available at {local_pdf}."
+            ) from error
     finally:
-        local_pdf.unlink(missing_ok=True)
+        if not keep_local:
+            local_pdf.unlink(missing_ok=True)
 
 
 def save_pdf(doc, path: str, *, app=None):
